@@ -19,7 +19,9 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
+DataSeeder.Seed(app.Services.GetRequiredService<TelemetryStore>());
+
+//Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();

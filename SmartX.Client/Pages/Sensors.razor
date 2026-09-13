@@ -77,6 +77,18 @@ else
             }
         </tbody>
     </table>
+
+    <h3>Live Status</h3>
+    <div class="status-grid">
+        @foreach (var sensor in sensors)
+        {
+            var status = SensorStatus(sensor);
+            <div class="status-badge @status">
+                <strong>@sensor.DeviceId</strong>
+                <span>@SensorStatusLabel(status)</span>
+            </div>
+        }
+    </div>
 }
 
 <hr />
@@ -112,6 +124,7 @@ else
 }
 
 <h2>Live Telemetry Readings</h2>
+<p class="legend"><span class="legend-swatch anomaly"></span> Highlighted rows are outside the safe range or show a sudden spike.</p>
 
 @if (dashboard is null)
 {
@@ -125,10 +138,10 @@ else
         <tbody>
             @foreach (var reading in dashboard.Environmental.OrderByDescending(r => r.Timestamp))
             {
-                <tr>
+                <tr class="@(IsEnvironmentalAnomaly(reading.Value) ? "anomaly-row" : "")">
                     <td>@reading.DeviceId</td>
                     <td>@reading.Zone</td>
-                    <td>@reading.Value</td>
+                    <td>@reading.Value @(IsEnvironmentalAnomaly(reading.Value) ? "⚠" : "")</td>
                     <td>@reading.Timestamp.ToString("HH:mm:ss")</td>
                 </tr>
             }
@@ -141,10 +154,10 @@ else
         <tbody>
             @foreach (var reading in dashboard.Power.OrderByDescending(r => r.Timestamp))
             {
-                <tr>
+                <tr class="@(IsPowerSpike(reading) ? "anomaly-row" : "")">
                     <td>@reading.DeviceId</td>
                     <td>@reading.Zone</td>
-                    <td>@reading.Value</td>
+                    <td>@reading.Value @(IsPowerSpike(reading) ? "⚠" : "")</td>
                     <td>@reading.Timestamp.ToString("HH:mm:ss")</td>
                 </tr>
             }
@@ -169,6 +182,11 @@ else
 }
 
 @code {
+    private const float EnvironmentalLowThreshold = 15f;
+    private const float EnvironmentalHighThreshold = 85f;
+    private const int PowerSpikeThresholdWatts = 500;
+    private static readonly TimeSpan StaleAfter = TimeSpan.FromSeconds(60);
+
     private SensorRegistration newSensor = new();
     private List<SensorRegistration>? sensors;
     private bool isRegistering;
@@ -305,4 +323,50 @@ else
 
         isSubmittingTelemetry = false;
     }
+
+    //Proactive Anomaly / Alert Highlighting
+
+    private bool IsEnvironmentalAnomaly(float value) =>
+        value < EnvironmentalLowThreshold || value > EnvironmentalHighThreshold;
+
+    private bool IsPowerSpike(TelemetryPacket<int> reading)
+    {
+        if (dashboard is null) return false;
+
+        var previous = dashboard.Power
+            .Where(r => r.DeviceId == reading.DeviceId && r.Timestamp < reading.Timestamp)
+            .OrderByDescending(r => r.Timestamp)
+            .FirstOrDefault();
+
+        if (previous is null) return false;
+
+        var currentMeter = new PowerMeterReading(reading.DeviceId, reading.Value);
+        var previousMeter = new PowerMeterReading(previous.DeviceId, previous.Value);
+        double delta = currentMeter - previousMeter;
+
+        return Math.Abs(delta) > PowerSpikeThresholdWatts;
+    }
+
+    private string SensorStatus(SensorRegistration sensor)
+    {
+        if (dashboard is null) return "unknown";
+
+        var timestamps = new List<DateTime>();
+        timestamps.AddRange(dashboard.Environmental.Where(r => r.DeviceId == sensor.DeviceId).Select(r => r.Timestamp));
+        timestamps.AddRange(dashboard.Power.Where(r => r.DeviceId == sensor.DeviceId).Select(r => r.Timestamp));
+        timestamps.AddRange(dashboard.Actuator.Where(r => r.DeviceId == sensor.DeviceId).Select(r => r.Timestamp));
+
+        if (timestamps.Count == 0) return "no-data";
+
+        var lastSeen = timestamps.Max();
+        return (DateTime.UtcNow - lastSeen) > StaleAfter ? "stale" : "ok";
+    }
+
+    private string SensorStatusLabel(string status) => status switch
+    {
+        "ok" => "Live",
+        "stale" => "Stale - check connection",
+        "no-data" => "No data received",
+        _ => "Unknown"
+    };
 }
