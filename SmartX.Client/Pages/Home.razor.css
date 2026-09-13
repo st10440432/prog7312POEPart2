@@ -1,0 +1,50 @@
+﻿.pillar-container {
+    max-width: 960px;
+    margin: 2rem auto;
+    padding: 0 1rem;
+}
+
+.pillar-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1.5rem;
+    margin-top: 2rem;
+}
+
+.pillar-card {
+    display: block;
+    padding: 1.5rem;
+    border-radius: 10px;
+    border: 1px solid #d7dde5;
+    text-decoration: none;
+    color: inherit;
+    transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+    .pillar-card.active {
+        background: #eef4ff;
+        border-color: #3b5bdb;
+        cursor: pointer;
+    }
+
+        .pillar-card.active:hover {
+            box-shadow: 0 4px 14px rgba(59, 91, 219, 0.25);
+            transform: translateY(-2px);
+        }
+
+    .pillar-card.disabled {
+        background: #f4f5f7;
+        color: #9aa1ac;
+        cursor: not-allowed;
+        opacity: 0.7;
+    }
+
+    .pillar-card h2 {
+        margin: 0 0 0.5rem 0;
+        font-size: 1.15rem;
+    }
+
+    .pillar-card p {
+        margin: 0;
+        font-size: 0.9rem;
+    }

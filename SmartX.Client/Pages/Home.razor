@@ -1,7 +1,29 @@
-﻿@page "/"
+﻿@*
+//ST10440432
+//Matteo Nusca
+*@
+@page "/"
 
-<PageTitle>Home</PageTitle>
+<PageTitle>Smart-X Gateway</PageTitle>
 
-<h1>Hello, world!</h1>
+<div class="pillar-container">
+    <h1>Smart-X IoT Mesh Gateway</h1>
+    <p>Select a module to continue.</p>
 
-Welcome to your new app.
+    <div class="pillar-grid">
+        <a class="pillar-card active" href="/sensors">
+            <h2>Sensor Data Ingestion &amp; Telemetry</h2>
+            <p>Register sensors, ingest live telemetry, and monitor readings with proactive anomaly highlighting.</p>
+        </a>
+
+        <div class="pillar-card disabled">
+            <h2>Real-Time Command Stream &amp; History</h2>
+            <p>Disabled - to be implemented in Part 2.</p>
+        </div>
+
+        <div class="pillar-card disabled">
+            <h2>Network Topology &amp; Mesh Routing</h2>
+            <p>Disabled - to be implemented in the final PoE.</p>
+        </div>
+    </div>
+</div>
