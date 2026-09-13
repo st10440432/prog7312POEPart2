@@ -5,19 +5,29 @@ using SmartX.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-//Add services to container
+//Add services to container.
 builder.Services.AddOpenApi();
 builder.Services.AddSingleton<TelemetryStore>();
 
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowBlazorClient", policy =>
+        policy.AllowAnyOrigin()
+              .AllowAnyMethod()
+              .AllowAnyHeader());
+});
+
 var app = builder.Build();
 
-//Configure HTTP request pipeline
+// Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
 
 app.UseHttpsRedirection();
+app.UseCors("AllowBlazorClient");
+
 app.MapSensorEndpoints();
 app.MapTelemetryEndpoints();
 app.MapFileUploadEndpoints();
