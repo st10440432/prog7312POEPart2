@@ -20,5 +20,6 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 app.MapSensorEndpoints();
 app.MapTelemetryEndpoints();
+app.MapFileUploadEndpoints();
 
 app.Run();
