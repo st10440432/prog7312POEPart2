@@ -79,6 +79,95 @@ else
     </table>
 }
 
+<hr />
+
+<h2>Submit Telemetry Reading</h2>
+
+<div class="form-row">
+    <label>Sensor</label>
+    <select @bind="selectedDeviceId">
+        <option value="">-- select a sensor --</option>
+        @if (sensors is not null)
+        {
+            @foreach (var sensor in sensors)
+            {
+                <option value="@sensor.DeviceId">@sensor.DeviceId (@sensor.Category)</option>
+            }
+        }
+    </select>
+</div>
+
+<div class="form-row">
+    <label>Value</label>
+    <input @bind="telemetryValueInput" placeholder="decimal for Environmental, whole number for Power, true/false for Actuator" />
+</div>
+
+<button class="btn-primary" @onclick="SubmitTelemetryAsync" disabled="@isSubmittingTelemetry">
+    @(isSubmittingTelemetry ? "Submitting..." : "Submit Reading")
+</button>
+
+@if (!string.IsNullOrEmpty(telemetryStatusMessage))
+{
+    <p class="status-message @(telemetryStatusIsError ? "error" : "success")">@telemetryStatusMessage</p>
+}
+
+<h2>Live Telemetry Readings</h2>
+
+@if (dashboard is null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <h3>Environmental</h3>
+    <table class="sensor-table">
+        <thead><tr><th>Device</th><th>Zone</th><th>Value</th><th>Time</th></tr></thead>
+        <tbody>
+            @foreach (var reading in dashboard.Environmental.OrderByDescending(r => r.Timestamp))
+            {
+                <tr>
+                    <td>@reading.DeviceId</td>
+                    <td>@reading.Zone</td>
+                    <td>@reading.Value</td>
+                    <td>@reading.Timestamp.ToString("HH:mm:ss")</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    <h3>Power Consumption</h3>
+    <table class="sensor-table">
+        <thead><tr><th>Device</th><th>Zone</th><th>Watts</th><th>Time</th></tr></thead>
+        <tbody>
+            @foreach (var reading in dashboard.Power.OrderByDescending(r => r.Timestamp))
+            {
+                <tr>
+                    <td>@reading.DeviceId</td>
+                    <td>@reading.Zone</td>
+                    <td>@reading.Value</td>
+                    <td>@reading.Timestamp.ToString("HH:mm:ss")</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    <h3>Actuator States</h3>
+    <table class="sensor-table">
+        <thead><tr><th>Device</th><th>Zone</th><th>State</th><th>Time</th></tr></thead>
+        <tbody>
+            @foreach (var reading in dashboard.Actuator.OrderByDescending(r => r.Timestamp))
+            {
+                <tr>
+                    <td>@reading.DeviceId</td>
+                    <td>@reading.Zone</td>
+                    <td>@(reading.Value ? "ON" : "OFF")</td>
+                    <td>@reading.Timestamp.ToString("HH:mm:ss")</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
 @code {
     private SensorRegistration newSensor = new();
     private List<SensorRegistration>? sensors;
@@ -86,14 +175,27 @@ else
     private string? statusMessage;
     private bool statusIsError;
 
+    private string? selectedDeviceId;
+    private string telemetryValueInput = string.Empty;
+    private bool isSubmittingTelemetry;
+    private string? telemetryStatusMessage;
+    private bool telemetryStatusIsError;
+    private TelemetryDashboardResponse? dashboard;
+
     protected override async Task OnInitializedAsync()
     {
         await LoadSensorsAsync();
+        await LoadTelemetryAsync();
     }
 
     private async Task LoadSensorsAsync()
     {
         sensors = await Http.GetFromJsonAsync<List<SensorRegistration>>("api/sensors");
+    }
+
+    private async Task LoadTelemetryAsync()
+    {
+        dashboard = await Http.GetFromJsonAsync<TelemetryDashboardResponse>("api/telemetry");
     }
 
     private async Task RegisterSensorAsync()
@@ -118,5 +220,89 @@ else
         }
 
         isRegistering = false;
+    }
+
+    private async Task SubmitTelemetryAsync()
+    {
+        telemetryStatusMessage = null;
+
+        if (string.IsNullOrWhiteSpace(selectedDeviceId))
+        {
+            telemetryStatusMessage = "Select a sensor first.";
+            telemetryStatusIsError = true;
+            return;
+        }
+
+        var sensor = sensors?.FirstOrDefault(s => s.DeviceId == selectedDeviceId);
+        if (sensor is null)
+        {
+            telemetryStatusMessage = "Selected sensor not found.";
+            telemetryStatusIsError = true;
+            return;
+        }
+
+        isSubmittingTelemetry = true;
+        HttpResponseMessage response;
+
+        switch (sensor.Category)
+        {
+            case SensorCategory.Environmental:
+                if (!float.TryParse(telemetryValueInput, out var floatValue))
+                {
+                    telemetryStatusMessage = "Environmental readings must be a decimal number (e.g. 42.5).";
+                    telemetryStatusIsError = true;
+                    isSubmittingTelemetry = false;
+                    return;
+                }
+                response = await Http.PostAsJsonAsync("api/telemetry/environmental",
+                    new TelemetryIngestRequest<float>(sensor.DeviceId, floatValue));
+                break;
+
+            case SensorCategory.PowerConsumption:
+                if (!int.TryParse(telemetryValueInput, out var intValue))
+                {
+                    telemetryStatusMessage = "Power readings must be a whole number of watts (e.g. 1500).";
+                    telemetryStatusIsError = true;
+                    isSubmittingTelemetry = false;
+                    return;
+                }
+                response = await Http.PostAsJsonAsync("api/telemetry/power",
+                    new TelemetryIngestRequest<int>(sensor.DeviceId, intValue));
+                break;
+
+            case SensorCategory.Actuator:
+                if (!bool.TryParse(telemetryValueInput, out var boolValue))
+                {
+                    telemetryStatusMessage = "Actuator readings must be 'true' or 'false'.";
+                    telemetryStatusIsError = true;
+                    isSubmittingTelemetry = false;
+                    return;
+                }
+                response = await Http.PostAsJsonAsync("api/telemetry/actuator",
+                    new TelemetryIngestRequest<bool>(sensor.DeviceId, boolValue));
+                break;
+
+            default:
+                telemetryStatusMessage = "Unknown sensor category.";
+                telemetryStatusIsError = true;
+                isSubmittingTelemetry = false;
+                return;
+        }
+
+        if (response.IsSuccessStatusCode)
+        {
+            telemetryStatusMessage = $"Reading recorded for {sensor.DeviceId}.";
+            telemetryStatusIsError = false;
+            telemetryValueInput = string.Empty;
+            await LoadTelemetryAsync();
+        }
+        else
+        {
+            var error = await response.Content.ReadAsStringAsync();
+            telemetryStatusMessage = $"Failed to submit reading: {error}";
+            telemetryStatusIsError = true;
+        }
+
+        isSubmittingTelemetry = false;
     }
 }

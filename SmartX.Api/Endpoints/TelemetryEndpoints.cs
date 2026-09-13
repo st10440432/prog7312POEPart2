@@ -12,7 +12,7 @@ public static class TelemetryEndpoints
         var group = app.MapGroup("/api/telemetry");
 
         //GET /api/telemetry all dashboard
-        group.MapGet("/", (TelemetryStore store) => Results.Ok(new
+        group.MapGet("/", (TelemetryStore store) => Results.Ok(new TelemetryDashboardResponse
         {
             Environmental = store.EnvironmentalReadings,
             Power = store.PowerReadings,
