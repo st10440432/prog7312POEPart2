@@ -1,0 +1,72 @@
+﻿.form-row {
+    margin-bottom: 1rem;
+    max-width: 420px;
+}
+
+    .form-row label {
+        display: block;
+        font-weight: 600;
+        margin-bottom: 0.25rem;
+        font-size: 0.9rem;
+    }
+
+    .form-row input,
+    .form-row select {
+        width: 100%;
+        padding: 0.5rem;
+        border: 1px solid #ccd2da;
+        border-radius: 6px;
+    }
+
+.btn-primary {
+    background: #3b5bdb;
+    color: white;
+    border: none;
+    padding: 0.6rem 1.2rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+    .btn-primary:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+
+.status-message {
+    padding: 0.6rem 1rem;
+    border-radius: 6px;
+    margin-top: 0.75rem;
+    max-width: 420px;
+}
+
+    .status-message.success {
+        background: #e6f7e9;
+        color: #1f7a1f;
+    }
+
+    .status-message.error {
+        background: #fbeaea;
+        color: #8a2020;
+    }
+
+.sensor-table {
+    border-collapse: collapse;
+    width: 100%;
+    max-width: 720px;
+    margin-top: 1rem;
+}
+
+    .sensor-table th,
+    .sensor-table td {
+        text-align: left;
+        padding: 0.5rem 0.75rem;
+        border-bottom: 1px solid #e5e8ec;
+    }
+
+    .sensor-table th {
+        background: #f4f5f7;
+        font-size: 0.85rem;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+    }

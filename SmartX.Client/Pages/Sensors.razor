@@ -1,0 +1,122 @@
+﻿@*
+//ST10440432
+//Matteo Nusca
+*@
+@page "/sensors"
+@inject HttpClient Http
+@using SmartX.Shared.Models
+@using System.Net.Http.Json
+
+<PageTitle>Sensor Data Ingestion - Smart-X</PageTitle>
+
+<h1>Sensor Data Ingestion &amp; Telemetry</h1>
+
+<h2>Register a Sensor</h2>
+
+<EditForm Model="@newSensor" OnValidSubmit="RegisterSensorAsync">
+    <DataAnnotationsValidator />
+    <ValidationSummary />
+
+    <div class="form-row">
+        <label>Device MAC / Unique ID</label>
+        <InputText @bind-Value="newSensor.DeviceId" placeholder="e.g. AA:BB:CC:DD:EE:01" />
+    </div>
+
+    <div class="form-row">
+        <label>Deployment Location (Room, Zone, Node ID)</label>
+        <InputText @bind-Value="newSensor.DeploymentLocation" placeholder="e.g. Greenhouse 2, Zone A, Node 5" />
+    </div>
+
+    <div class="form-row">
+        <label>Sensor Category</label>
+        <InputSelect @bind-Value="newSensor.Category">
+            <option value="@SensorCategory.Environmental">Environmental</option>
+            <option value="@SensorCategory.PowerConsumption">Power Consumption</option>
+            <option value="@SensorCategory.Actuator">Actuator</option>
+        </InputSelect>
+    </div>
+
+    <button type="submit" class="btn-primary" disabled="@isRegistering">
+        @(isRegistering ? "Registering..." : "Register Sensor")
+    </button>
+</EditForm>
+
+@if (!string.IsNullOrEmpty(statusMessage))
+{
+    <p class="status-message @(statusIsError ? "error" : "success")">@statusMessage</p>
+}
+
+<h2>Registered Sensors</h2>
+
+@if (sensors is null)
+{
+    <p>Loading...</p>
+}
+else if (sensors.Count == 0)
+{
+    <p>No sensors registered yet.</p>
+}
+else
+{
+    <table class="sensor-table">
+        <thead>
+            <tr>
+                <th>Device ID</th>
+                <th>Location</th>
+                <th>Category</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var sensor in sensors)
+            {
+                <tr>
+                    <td>@sensor.DeviceId</td>
+                    <td>@sensor.DeploymentLocation</td>
+                    <td>@sensor.Category</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private SensorRegistration newSensor = new();
+    private List<SensorRegistration>? sensors;
+    private bool isRegistering;
+    private string? statusMessage;
+    private bool statusIsError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadSensorsAsync();
+    }
+
+    private async Task LoadSensorsAsync()
+    {
+        sensors = await Http.GetFromJsonAsync<List<SensorRegistration>>("api/sensors");
+    }
+
+    private async Task RegisterSensorAsync()
+    {
+        isRegistering = true;
+        statusMessage = null;
+
+        var response = await Http.PostAsJsonAsync("api/sensors", newSensor);
+
+        if (response.IsSuccessStatusCode)
+        {
+            statusMessage = $"Sensor '{newSensor.DeviceId}' registered successfully.";
+            statusIsError = false;
+            newSensor = new SensorRegistration();
+            await LoadSensorsAsync();
+        }
+        else
+        {
+            var error = await response.Content.ReadAsStringAsync();
+            statusMessage = $"Failed to register sensor: {error}";
+            statusIsError = true;
+        }
+
+        isRegistering = false;
+    }
+}
