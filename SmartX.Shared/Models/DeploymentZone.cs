@@ -1,14 +1,6 @@
 ﻿//ST10440432
 //Matteo Nusca
 namespace SmartX.Shared.Models;
-
-/// <summary>
-/// Represents one node in a nested device deployment hierarchy
-/// (e.g. Facility A -> Zone 1 -> Sub-Zone B -> individual sensor node).
-/// Validate() recurses down through every descendant zone, so a
-/// misconfiguration anywhere in a deeply nested tree is caught without
-/// writing a separate loop for each possible depth.
-/// </summary>
 public sealed class DeploymentZone
 {
     public string Name { get; }
@@ -30,7 +22,7 @@ public sealed class DeploymentZone
             return false;
         }
 
-        // Recursive step
+        //Recursive step
         foreach (var child in Children)
         {
             if (!child.Validate(out invalidPath, currentPath))
