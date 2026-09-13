@@ -16,4 +16,8 @@
     <ProjectReference Include="..\SmartX.Shared\SmartX.Shared.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="wwwroot\sample-data\" />
+  </ItemGroup>
+
 </Project>
