@@ -21,7 +21,7 @@ public static class TelemetryBatchLoader
 
             foreach (float reading in deviceBatch)
             {
-                packets.Add(new TelemetryPacket<float>(deviceId, zone, category, reading));
+                packets.Add(new TelemetryPacket<float>(deviceId, zone, category, reading, DateTime.UtcNow));
             }
         }
 

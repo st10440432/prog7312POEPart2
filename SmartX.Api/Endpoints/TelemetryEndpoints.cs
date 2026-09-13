@@ -25,7 +25,7 @@ public static class TelemetryEndpoints
             var sensor = store.FindSensor(request.DeviceId);
             if (sensor is null) return Results.NotFound($"No sensor registered with DeviceId '{request.DeviceId}'.");
 
-            var packet = new TelemetryPacket<float>(request.DeviceId, sensor.DeploymentLocation, SensorCategory.Environmental, request.Value);
+            var packet = new TelemetryPacket<float>(request.DeviceId, sensor.DeploymentLocation, SensorCategory.Environmental, request.Value, DateTime.UtcNow);
             store.EnvironmentalReadings.Add(packet);
             return Results.Created($"/api/telemetry/environmental/{request.DeviceId}", packet);
         });
@@ -36,7 +36,7 @@ public static class TelemetryEndpoints
             var sensor = store.FindSensor(request.DeviceId);
             if (sensor is null) return Results.NotFound($"No sensor registered with DeviceId '{request.DeviceId}'.");
 
-            var packet = new TelemetryPacket<int>(request.DeviceId, sensor.DeploymentLocation, SensorCategory.PowerConsumption, request.Value);
+            var packet = new TelemetryPacket<int>(request.DeviceId, sensor.DeploymentLocation, SensorCategory.PowerConsumption, request.Value, DateTime.UtcNow);
             store.PowerReadings.Add(packet);
             return Results.Created($"/api/telemetry/power/{request.DeviceId}", packet);
         });
@@ -47,7 +47,7 @@ public static class TelemetryEndpoints
             var sensor = store.FindSensor(request.DeviceId);
             if (sensor is null) return Results.NotFound($"No sensor registered with DeviceId '{request.DeviceId}'.");
 
-            var packet = new TelemetryPacket<bool>(request.DeviceId, sensor.DeploymentLocation, SensorCategory.Actuator, request.Value);
+            var packet = new TelemetryPacket<bool>(request.DeviceId, sensor.DeploymentLocation, SensorCategory.Actuator, request.Value, DateTime.UtcNow);
             store.ActuatorReadings.Add(packet);
             return Results.Created($"/api/telemetry/actuator/{request.DeviceId}", packet);
         });

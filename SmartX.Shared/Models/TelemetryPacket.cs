@@ -16,13 +16,13 @@ public sealed class TelemetryPacket<T> where T : struct
     public T Value { get; }
     public DateTime Timestamp { get; }
 
-    public TelemetryPacket(string deviceId, string zone, SensorCategory category, T value, DateTime? timestamp = null)
+    public TelemetryPacket(string deviceId, string zone, SensorCategory category, T value, DateTime timestamp)
     {
         DeviceId = deviceId;
         Zone = zone;
         Category = category;
         Value = value;
-        Timestamp = timestamp ?? DateTime.UtcNow;
+        Timestamp = timestamp;
     }
 
     public override string ToString() => $"[{Timestamp:O}] {DeviceId} ({Category}) @ {Zone} = {Value}";
