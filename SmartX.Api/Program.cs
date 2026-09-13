@@ -1,5 +1,6 @@
 //ST10440432
 //Matteo Nusca
+using SmartX.Api.Endpoints;
 using SmartX.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -17,5 +18,6 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.MapSensorEndpoints();
 
 app.Run();
