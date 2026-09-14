@@ -2,25 +2,22 @@
 //ST10440432
 //Matteo Nusca
 *@
-<div class="top-row ps-3 navbar navbar-dark">
-    <div class="container-fluid">
-        <a class="navbar-brand" href="">Smart-X Gateway</a>
+<div class="sidebar-inner">
+    <div class="brand">
+        <span class="brand-mark">⬢</span>
+        <span class="brand-name">Smart-X</span>
     </div>
-</div>
 
-<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
-
-<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
-    <nav class="flex-column">
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
-                Home
-            </NavLink>
-        </div>
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="sensors">
-                Sensor Ingestion
-            </NavLink>
-        </div>
+    <nav class="nav-links">
+        <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+            <span class="nav-icon">🏠</span> Home
+        </NavLink>
+        <NavLink class="nav-link" href="sensors">
+            <span class="nav-icon">📡</span> Sensor Ingestion
+        </NavLink>
     </nav>
+
+    <div class="sidebar-footer">
+        Smart-X Gateway · Part 1
+    </div>
 </div>

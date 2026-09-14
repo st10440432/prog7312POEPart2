@@ -1,50 +1,78 @@
-﻿.pillar-container {
-    max-width: 960px;
-    margin: 2rem auto;
-    padding: 0 1rem;
+﻿.hero {
+    max-width: 640px;
+    margin-bottom: 2rem;
 }
+
+    .hero p {
+        color: var(--color-text-muted);
+    }
 
 .pillar-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    gap: 1.5rem;
-    margin-top: 2rem;
+    gap: 1.25rem;
 }
 
 .pillar-card {
-    display: block;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
     padding: 1.5rem;
-    border-radius: 10px;
-    border: 1px solid #d7dde5;
     text-decoration: none;
     color: inherit;
+    box-shadow: var(--shadow-sm);
     transition: box-shadow 0.15s ease, transform 0.15s ease;
 }
 
     .pillar-card.active {
-        background: #eef4ff;
-        border-color: #3b5bdb;
+        border-color: var(--color-primary);
         cursor: pointer;
     }
 
         .pillar-card.active:hover {
-            box-shadow: 0 4px 14px rgba(59, 91, 219, 0.25);
-            transform: translateY(-2px);
+            box-shadow: var(--shadow-md);
+            transform: translateY(-3px);
+            text-decoration: none;
         }
 
     .pillar-card.disabled {
-        background: #f4f5f7;
-        color: #9aa1ac;
+        opacity: 0.6;
         cursor: not-allowed;
-        opacity: 0.7;
+        background: #fafafa;
     }
 
-    .pillar-card h2 {
-        margin: 0 0 0.5rem 0;
-        font-size: 1.15rem;
-    }
+.pillar-icon {
+    font-size: 1.75rem;
+}
 
-    .pillar-card p {
-        margin: 0;
-        font-size: 0.9rem;
-    }
+.pillar-card h2 {
+    font-size: 1.05rem;
+    margin: 0;
+}
+
+.pillar-card p {
+    font-size: 0.88rem;
+    color: var(--color-text-muted);
+    margin: 0;
+    flex: 1;
+}
+
+.pillar-tag {
+    align-self: flex-start;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    background: var(--color-primary);
+    color: white;
+}
+
+.pillar-card.disabled .pillar-tag {
+    background: #d1d5db;
+    color: #4b5563;
+}
