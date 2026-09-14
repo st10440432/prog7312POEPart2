@@ -10,235 +10,248 @@
 
 <PageTitle>Sensor Data Ingestion - Smart-X</PageTitle>
 
-<h1>Sensor Data Ingestion &amp; Telemetry</h1>
+<div class="page-header">
+    <h1>Sensor Data Ingestion &amp; Telemetry</h1>
+    <p>Register devices, ingest telemetry, and monitor readings with proactive anomaly highlighting.</p>
+</div>
 
-<h2>Register a Sensor</h2>
+<div class="card">
+    <h2>Register a Sensor</h2>
+    <EditForm Model="@newSensor" OnValidSubmit="RegisterSensorAsync">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
 
-<EditForm Model="@newSensor" OnValidSubmit="RegisterSensorAsync">
-    <DataAnnotationsValidator />
-    <ValidationSummary />
-
-    <div class="form-row">
-        <label>Device MAC / Unique ID</label>
-        <InputText @bind-Value="newSensor.DeviceId" placeholder="e.g. AA:BB:CC:DD:EE:01" />
-    </div>
-
-    <div class="form-row">
-        <label>Deployment Location (Room, Zone, Node ID)</label>
-        <InputText @bind-Value="newSensor.DeploymentLocation" placeholder="e.g. Greenhouse 2, Zone A, Node 5" />
-    </div>
-
-    <div class="form-row">
-        <label>Sensor Category</label>
-        <InputSelect @bind-Value="newSensor.Category">
-            <option value="@SensorCategory.Environmental">Environmental</option>
-            <option value="@SensorCategory.PowerConsumption">Power Consumption</option>
-            <option value="@SensorCategory.Actuator">Actuator</option>
-        </InputSelect>
-    </div>
-
-    <button type="submit" class="btn-primary" disabled="@isRegistering">
-        @(isRegistering ? "Registering..." : "Register Sensor")
-    </button>
-</EditForm>
-
-@if (!string.IsNullOrEmpty(statusMessage))
-{
-    <p class="status-message @(statusIsError ? "error" : "success")">@statusMessage</p>
-}
-
-<h2>Registered Sensors</h2>
-
-@if (sensors is null)
-{
-    <p>Loading...</p>
-}
-else if (sensors.Count == 0)
-{
-    <p>No sensors registered yet.</p>
-}
-else
-{
-    <table class="sensor-table">
-        <thead>
-            <tr>
-                <th>Device ID</th>
-                <th>Location</th>
-                <th>Category</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var sensor in sensors)
-            {
-                <tr>
-                    <td>@sensor.DeviceId</td>
-                    <td>@sensor.DeploymentLocation</td>
-                    <td>@sensor.Category</td>
-                </tr>
-            }
-        </tbody>
-    </table>
-
-    <h3>Live Status</h3>
-    <div class="status-grid">
-        @foreach (var sensor in sensors)
-        {
-            var status = SensorStatus(sensor);
-            <div class="status-badge @status">
-                <strong>@sensor.DeviceId</strong>
-                <span>@SensorStatusLabel(status)</span>
+        <div class="form-grid">
+            <div class="form-row">
+                <label>Device MAC / Unique ID</label>
+                <InputText @bind-Value="newSensor.DeviceId" placeholder="e.g. AA:BB:CC:DD:EE:01" />
             </div>
-        }
-    </div>
-}
 
-<hr />
+            <div class="form-row">
+                <label>Deployment Location</label>
+                <InputText @bind-Value="newSensor.DeploymentLocation" placeholder="e.g. Greenhouse 2, Zone A, Node 5" />
+            </div>
 
-<h2>Submit Telemetry Reading</h2>
+            <div class="form-row">
+                <label>Sensor Category</label>
+                <InputSelect @bind-Value="newSensor.Category">
+                    <option value="@SensorCategory.Environmental">Environmental</option>
+                    <option value="@SensorCategory.PowerConsumption">Power Consumption</option>
+                    <option value="@SensorCategory.Actuator">Actuator</option>
+                </InputSelect>
+            </div>
+        </div>
 
-<div class="form-row">
-    <label>Sensor</label>
-    <select @bind="selectedDeviceId">
-        <option value="">-- select a sensor --</option>
-        @if (sensors is not null)
-        {
-            @foreach (var sensor in sensors)
-            {
-                <option value="@sensor.DeviceId">@sensor.DeviceId (@sensor.Category)</option>
-            }
-        }
-    </select>
-</div>
+        <button type="submit" class="btn-primary" disabled="@isRegistering">
+            @(isRegistering ? "Registering..." : "Register Sensor")
+        </button>
+    </EditForm>
 
-<div class="form-row">
-    <label>Value</label>
-    <input @bind="telemetryValueInput" placeholder="decimal for Environmental, whole number for Power, true/false for Actuator" />
-</div>
-
-<button class="btn-primary" @onclick="SubmitTelemetryAsync" disabled="@isSubmittingTelemetry">
-    @(isSubmittingTelemetry ? "Submitting..." : "Submit Reading")
-</button>
-
-@if (!string.IsNullOrEmpty(telemetryStatusMessage))
-{
-    <p class="status-message @(telemetryStatusIsError ? "error" : "success")">@telemetryStatusMessage</p>
-}
-
-<h2>Live Telemetry Readings</h2>
-<p class="legend"><span class="legend-swatch anomaly"></span> Highlighted rows are outside the safe range or show a sudden spike.</p>
-
-@if (dashboard is null)
-{
-    <p>Loading...</p>
-}
-else
-{
-    <h3>Environmental</h3>
-    <table class="sensor-table">
-        <thead><tr><th>Device</th><th>Zone</th><th>Value</th><th>Time</th></tr></thead>
-        <tbody>
-            @foreach (var reading in dashboard.Environmental.OrderByDescending(r => r.Timestamp))
-            {
-                <tr class="@(IsEnvironmentalAnomaly(reading.Value) ? "anomaly-row" : "")">
-                    <td>@reading.DeviceId</td>
-                    <td>@reading.Zone</td>
-                    <td>@reading.Value @(IsEnvironmentalAnomaly(reading.Value) ? "⚠" : "")</td>
-                    <td>@reading.Timestamp.ToString("HH:mm:ss")</td>
-                </tr>
-            }
-        </tbody>
-    </table>
-
-    <h3>Power Consumption</h3>
-    <table class="sensor-table">
-        <thead><tr><th>Device</th><th>Zone</th><th>Watts</th><th>Time</th></tr></thead>
-        <tbody>
-            @foreach (var reading in dashboard.Power.OrderByDescending(r => r.Timestamp))
-            {
-                <tr class="@(IsPowerSpike(reading) ? "anomaly-row" : "")">
-                    <td>@reading.DeviceId</td>
-                    <td>@reading.Zone</td>
-                    <td>@reading.Value @(IsPowerSpike(reading) ? "⚠" : "")</td>
-                    <td>@reading.Timestamp.ToString("HH:mm:ss")</td>
-                </tr>
-            }
-        </tbody>
-    </table>
-
-    <h3>Actuator States</h3>
-    <table class="sensor-table">
-        <thead><tr><th>Device</th><th>Zone</th><th>State</th><th>Time</th></tr></thead>
-        <tbody>
-            @foreach (var reading in dashboard.Actuator.OrderByDescending(r => r.Timestamp))
-            {
-                <tr>
-                    <td>@reading.DeviceId</td>
-                    <td>@reading.Zone</td>
-                    <td>@(reading.Value ? "ON" : "OFF")</td>
-                    <td>@reading.Timestamp.ToString("HH:mm:ss")</td>
-                </tr>
-            }
-        </tbody>
-    </table>
-}
-
-<hr />
-
-<h2>Attach a File to a Sensor</h2>
-<p class="hint">Attach a device configuration file, deployment photo, or hardware log to a registered sensor.</p>
-
-<div class="form-row">
-    <label>Sensor</label>
-    <select @bind="uploadDeviceId" @bind:after="LoadAttachedFilesAsync">
-        <option value="">-- select a sensor --</option>
-        @if (sensors is not null)
-        {
-            @foreach (var sensor in sensors)
-            {
-                <option value="@sensor.DeviceId">@sensor.DeviceId</option>
-            }
-        }
-    </select>
-</div>
-
-<div class="form-row">
-    <label>File</label>
-    <InputFile OnChange="OnFileSelected" />
-</div>
-
-<button class="btn-primary" @onclick="UploadFileAsync" disabled="@(isUploading || selectedFile is null)">
-    @(isUploading ? "Uploading..." : "Upload File")
-</button>
-
-@if (!string.IsNullOrEmpty(uploadStatusMessage))
-{
-    <p class="status-message @(uploadStatusIsError ? "error" : "success")">@uploadStatusMessage</p>
-}
-
-@if (!string.IsNullOrWhiteSpace(uploadDeviceId) && attachedFiles is not null)
-{
-    <h3>Files attached to @uploadDeviceId</h3>
-    @if (attachedFiles.Count == 0)
+    @if (!string.IsNullOrEmpty(statusMessage))
     {
-        <p>No files attached yet.</p>
+        <p class="status-message @(statusIsError ? "error" : "success")">@statusMessage</p>
+    }
+</div>
+
+<div class="card">
+    <h2>Registered Sensors</h2>
+
+    @if (sensors is null)
+    {
+        <p class="muted">Loading...</p>
+    }
+    else if (sensors.Count == 0)
+    {
+        <p class="muted">No sensors registered yet.</p>
     }
     else
     {
-        <ul>
-            @foreach (var fileName in attachedFiles)
+        <table class="sensor-table">
+            <thead>
+                <tr>
+                    <th>Device ID</th>
+                    <th>Location</th>
+                    <th>Category</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var sensor in sensors)
+                {
+                    <tr>
+                        <td class="mono">@sensor.DeviceId</td>
+                        <td>@sensor.DeploymentLocation</td>
+                        <td><span class="category-pill">@sensor.Category</span></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        <h3 class="section-label">Live Status</h3>
+        <div class="status-grid">
+            @foreach (var sensor in sensors)
             {
-                <li>@fileName</li>
+                var status = SensorStatus(sensor);
+                <div class="status-badge @status">
+                    <strong class="mono">@sensor.DeviceId</strong>
+                    <span>@SensorStatusLabel(status)</span>
+                </div>
             }
-        </ul>
+        </div>
     }
-}
+</div>
+
+<div class="card">
+    <h2>Submit Telemetry Reading</h2>
+    <div class="form-grid">
+        <div class="form-row">
+            <label>Sensor</label>
+            <select @bind="selectedDeviceId">
+                <option value="">-- select a sensor --</option>
+                @if (sensors is not null)
+                {
+                    @foreach (var sensor in sensors)
+                    {
+                        <option value="@sensor.DeviceId">@sensor.DeviceId (@sensor.Category)</option>
+                    }
+                }
+            </select>
+        </div>
+
+        <div class="form-row">
+            <label>Value</label>
+            <input @bind="telemetryValueInput" placeholder="decimal / whole number / true-false" />
+        </div>
+    </div>
+
+    <button class="btn-primary" @onclick="SubmitTelemetryAsync" disabled="@isSubmittingTelemetry">
+        @(isSubmittingTelemetry ? "Submitting..." : "Submit Reading")
+    </button>
+
+    @if (!string.IsNullOrEmpty(telemetryStatusMessage))
+    {
+        <p class="status-message @(telemetryStatusIsError ? "error" : "success")">@telemetryStatusMessage</p>
+    }
+</div>
+
+<div class="card">
+    <h2>Live Telemetry Readings</h2>
+    <p class="legend"><span class="legend-swatch anomaly"></span> Highlighted rows are outside the safe range or show a sudden spike.</p>
+
+    @if (dashboard is null)
+    {
+        <p class="muted">Loading...</p>
+    }
+    else
+    {
+        <h3 class="section-label">Environmental</h3>
+        <table class="sensor-table">
+            <thead><tr><th>Device</th><th>Zone</th><th>Value</th><th>Time</th></tr></thead>
+            <tbody>
+                @foreach (var reading in dashboard.Environmental.OrderByDescending(r => r.Timestamp))
+                {
+                    <tr class="@(IsEnvironmentalAnomaly(reading.Value) ? "anomaly-row" : "")">
+                        <td class="mono">@reading.DeviceId</td>
+                        <td>@reading.Zone</td>
+                        <td>@reading.Value @(IsEnvironmentalAnomaly(reading.Value) ? "⚠" : "")</td>
+                        <td class="mono">@reading.Timestamp.ToString("HH:mm:ss")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        <h3 class="section-label">Power Consumption</h3>
+        <table class="sensor-table">
+            <thead><tr><th>Device</th><th>Zone</th><th>Watts</th><th>Time</th></tr></thead>
+            <tbody>
+                @foreach (var reading in dashboard.Power.OrderByDescending(r => r.Timestamp))
+                {
+                    <tr class="@(IsPowerSpike(reading) ? "anomaly-row" : "")">
+                        <td class="mono">@reading.DeviceId</td>
+                        <td>@reading.Zone</td>
+                        <td>@reading.Value @(IsPowerSpike(reading) ? "⚠" : "")</td>
+                        <td class="mono">@reading.Timestamp.ToString("HH:mm:ss")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        <h3 class="section-label">Actuator States</h3>
+        <table class="sensor-table">
+            <thead><tr><th>Device</th><th>Zone</th><th>State</th><th>Time</th></tr></thead>
+            <tbody>
+                @foreach (var reading in dashboard.Actuator.OrderByDescending(r => r.Timestamp))
+                {
+                    <tr>
+                        <td class="mono">@reading.DeviceId</td>
+                        <td>@reading.Zone</td>
+                        <td><span class="state-pill @(reading.Value ? "on" : "off")">@(reading.Value ? "ON" : "OFF")</span></td>
+                        <td class="mono">@reading.Timestamp.ToString("HH:mm:ss")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+<div class="card">
+    <h2>Attach a File to a Sensor</h2>
+    <p class="hint">Attach a device configuration file, deployment photo, or hardware log to a registered sensor.</p>
+
+    <div class="form-grid">
+        <div class="form-row">
+            <label>Sensor</label>
+            <select @bind="uploadDeviceId" @bind:after="LoadAttachedFilesAsync">
+                <option value="">-- select a sensor --</option>
+                @if (sensors is not null)
+                {
+                    @foreach (var sensor in sensors)
+                    {
+                        <option value="@sensor.DeviceId">@sensor.DeviceId</option>
+                    }
+                }
+            </select>
+        </div>
+
+        <div class="form-row">
+            <label>File</label>
+            <InputFile OnChange="OnFileSelected" />
+        </div>
+    </div>
+
+    <button class="btn-primary" @onclick="UploadFileAsync" disabled="@(isUploading || selectedFile is null)">
+        @(isUploading ? "Uploading..." : "Upload File")
+    </button>
+
+    @if (!string.IsNullOrEmpty(uploadStatusMessage))
+    {
+        <p class="status-message @(uploadStatusIsError ? "error" : "success")">@uploadStatusMessage</p>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(uploadDeviceId) && attachedFiles is not null)
+    {
+        <h3 class="section-label">Files attached to @uploadDeviceId</h3>
+        @if (attachedFiles.Count == 0)
+        {
+            <p class="muted">No files attached yet.</p>
+        }
+        else
+        {
+            <ul class="file-list">
+                @foreach (var fileName in attachedFiles)
+                {
+                    <li>@fileName</li>
+                }
+            </ul>
+        }
+    }
+</div>
 
 @code {
     private const float EnvironmentalLowThreshold = 15f;
     private const float EnvironmentalHighThreshold = 85f;
     private const int PowerSpikeThresholdWatts = 500;
     private static readonly TimeSpan StaleAfter = TimeSpan.FromSeconds(60);
-    private const long MaxUploadFileSize = 10 * 1024 * 1024; //10 MB cap
+    private const long MaxUploadFileSize = 10 * 1024 * 1024; // 10 MB cap
 
     private SensorRegistration newSensor = new();
     private List<SensorRegistration>? sensors;
@@ -384,8 +397,6 @@ else
         isSubmittingTelemetry = false;
     }
 
-    //Proactive Anomaly / Alert Highlighting
-
     private bool IsEnvironmentalAnomaly(float value) =>
         value < EnvironmentalLowThreshold || value > EnvironmentalHighThreshold;
 
@@ -429,8 +440,6 @@ else
         "no-data" => "No data received",
         _ => "Unknown"
     };
-
-    //File Upload
 
     private void OnFileSelected(InputFileChangeEventArgs e)
     {
