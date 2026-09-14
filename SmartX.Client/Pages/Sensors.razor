@@ -397,6 +397,8 @@
         isSubmittingTelemetry = false;
     }
 
+    //Proactive Anomaly / Alert Highlighting
+
     private bool IsEnvironmentalAnomaly(float value) =>
         value < EnvironmentalLowThreshold || value > EnvironmentalHighThreshold;
 
@@ -440,6 +442,8 @@
         "no-data" => "No data received",
         _ => "Unknown"
     };
+
+    //File Upload
 
     private void OnFileSelected(InputFileChangeEventArgs e)
     {
