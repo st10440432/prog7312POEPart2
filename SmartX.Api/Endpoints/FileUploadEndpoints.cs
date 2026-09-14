@@ -22,7 +22,8 @@ public static class FileUploadEndpoints
             if (file.Length == 0)
                 return Results.BadRequest("Uploaded file is empty.");
 
-            var sensorFolder = Path.Combine(UploadsRoot, deviceId);
+            var safeDeviceFolder = string.Concat(deviceId.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
+            var sensorFolder = Path.Combine(UploadsRoot, safeDeviceFolder);
             Directory.CreateDirectory(sensorFolder);
 
             var safeFileName = Path.GetFileName(file.FileName); //strip any directory traversal
