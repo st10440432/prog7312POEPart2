@@ -1,4 +1,5 @@
 services:
+
   smartx-api:
     build:
       context: .
@@ -6,6 +7,9 @@ services:
     container_name: smartx-api
     ports:
       - "8080:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
 
   smartx-client:
     build:
