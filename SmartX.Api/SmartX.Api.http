@@ -1,6 +1,124 @@
 @SmartX.Api_HostAddress = http://localhost:5248
 
-GET {{SmartX.Api_HostAddress}}/weatherforecast/
+### ---------------------------------------------------------------- health
+GET {{SmartX.Api_HostAddress}}/
+
+### ------------------------------------------------- Part 1: sensors
+GET {{SmartX.Api_HostAddress}}/api/sensors
 Accept: application/json
 
 ###
+# Register a sensor (location is validated recursively: Facility -> Zone -> Node)
+POST {{SmartX.Api_HostAddress}}/api/sensors
+Content-Type: application/json
+
+{
+  "deviceId": "AA:BB:CC:DD:EE:01",
+  "friendlyName": "Pump C",
+  "deploymentLocation": "Greenhouse 2, Zone A, Node 5",
+  "category": 2
+}
+
+###
+# Invalid hierarchy (empty zone) -> 400
+POST {{SmartX.Api_HostAddress}}/api/sensors
+Content-Type: application/json
+
+{
+  "deviceId": "AA:BB:CC:DD:EE:02",
+  "deploymentLocation": "Greenhouse 2, , Node 5",
+  "category": 0
+}
+
+###
+GET {{SmartX.Api_HostAddress}}/api/zones
+
+### ------------------------------------------ Part 1/2: telemetry ingest
+# category: 0 = Environmental, 1 = PowerConsumption, 2 = Actuator
+
+# Normal reading -> FIFO lane
+POST {{SmartX.Api_HostAddress}}/api/telemetry/environmental
+Content-Type: application/json
+
+{ "deviceId": "AA:BB:CC:00:00:01", "value": 45.0 }
+
+###
+# Severe out-of-range reading -> PRIORITY lane + alert
+POST {{SmartX.Api_HostAddress}}/api/telemetry/environmental
+Content-Type: application/json
+
+{ "deviceId": "AA:BB:CC:00:00:01", "value": 6.0 }
+
+###
+# Establish a baseline, then spike (> 500 W jump) -> PRIORITY lane
+POST {{SmartX.Api_HostAddress}}/api/telemetry/power
+Content-Type: application/json
+
+{ "deviceId": "AA:BB:CC:00:00:03", "value": 500 }
+
+###
+POST {{SmartX.Api_HostAddress}}/api/telemetry/power
+Content-Type: application/json
+
+{ "deviceId": "AA:BB:CC:00:00:03", "value": 1700 }
+
+###
+# Backlog builder: 3 normal readings in one batch
+POST {{SmartX.Api_HostAddress}}/api/telemetry/batch
+Content-Type: application/json
+
+{ "readings": [
+  { "deviceId": "AA:BB:CC:00:00:02", "value": 50 },
+  { "deviceId": "AA:BB:CC:00:00:02", "value": 51 },
+  { "deviceId": "AA:BB:CC:00:00:02", "value": 52 }
+] }
+
+###
+# Sorted timeline for one device (last 30 minutes, at most 100 points)
+GET {{SmartX.Api_HostAddress}}/api/telemetry/AA:BB:CC:00:00:02/history?minutes=30&max=100
+
+### -------------------------------------------- Part 2: dashboard snapshot
+GET {{SmartX.Api_HostAddress}}/api/stream/snapshot
+
+###
+GET {{SmartX.Api_HostAddress}}/api/stream/snapshot?search=pump&category=2&alertsOnly=false
+
+### ------------------------------------------------- Part 2: commands
+# action: 0 = TurnOn, 1 = TurnOff, 2 = Toggle
+POST {{SmartX.Api_HostAddress}}/api/commands
+Content-Type: application/json
+
+{ "deviceId": "AA:BB:CC:00:00:06", "action": 0 }
+
+###
+# Shut down every actuator whose name matches "valve" (one undo step)
+POST {{SmartX.Api_HostAddress}}/api/commands/bulk
+Content-Type: application/json
+
+{ "filter": "valve", "action": 1 }
+
+###
+# Undo the most recent command (pops the stack)
+POST {{SmartX.Api_HostAddress}}/api/commands/undo
+
+###
+GET {{SmartX.Api_HostAddress}}/api/commands/history
+
+###
+GET {{SmartX.Api_HostAddress}}/api/commands/desired-state
+
+### ---------------------------------------------- Part 2: predictive engine
+GET {{SmartX.Api_HostAddress}}/api/insights
+
+###
+# The dashboard reports a search so the engine can learn from it
+POST {{SmartX.Api_HostAddress}}/api/insights/events
+Content-Type: application/json
+
+{ "term": "Pump A" }
+
+###
+POST {{SmartX.Api_HostAddress}}/api/insights/feedback
+Content-Type: application/json
+
+{ "suggestionId": "Cmd:AA:BB:CC:00:00:06:On", "accepted": true }
