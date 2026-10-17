@@ -1,4 +1,4 @@
-﻿//ST10440432
+//ST10440432
 //Matteo Nusca
 using System.ComponentModel.DataAnnotations;
 
@@ -13,6 +13,12 @@ public sealed class SensorRegistration
     public string DeploymentLocation { get; set; } = string.Empty;
 
     public SensorCategory Category { get; set; }
+
+    public string? FriendlyName { get; set; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string DisplayName => string.IsNullOrWhiteSpace(FriendlyName) ? DeviceId : FriendlyName!;
+
     public List<string> AttachedFileNames { get; set; } = new();
 
     public override string ToString() => $"{DeviceId} ({Category}) @ {DeploymentLocation}";
