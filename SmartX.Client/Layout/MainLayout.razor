@@ -1,8 +1,10 @@
-﻿@*
+@*
 //ST10440432
 //Matteo Nusca
 *@
 @inherits LayoutComponentBase
+@implements IDisposable
+@inject NavigationManager Navigation
 
 <div class="page">
     <div class="sidebar">
@@ -11,7 +13,38 @@
 
     <main>
         <div class="page-container">
-            @Body
+           
+            <ErrorBoundary @ref="boundary">
+                <ChildContent>
+                    @Body
+                </ChildContent>
+                <ErrorContent Context="exception">
+                    <div class="card page-error">
+                        <h2>This view hit a problem</h2>
+                        <p>@exception.Message</p>
+                        <p class="page-error-hint">Your other pages and data are unaffected.</p>
+                        <button class="page-error-btn" @onclick="Recover">Reload this view</button>
+                    </div>
+                </ErrorContent>
+            </ErrorBoundary>
         </div>
     </main>
 </div>
+
+@code {
+    private ErrorBoundary? boundary;
+
+    protected override void OnInitialized()
+    {
+        Navigation.LocationChanged += OnLocationChanged;
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e) => boundary?.Recover();
+
+    private void Recover() => boundary?.Recover();
+
+    public void Dispose()
+    {
+        Navigation.LocationChanged -= OnLocationChanged;
+    }
+}
