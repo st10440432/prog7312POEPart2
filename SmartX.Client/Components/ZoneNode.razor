@@ -1,0 +1,29 @@
+@*
+//ST10440432
+//Matteo Nusca
+*@
+
+<li class="zone">
+    <div class="zone-row @(Node.TotalAlerts > 0 ? "has-alert" : "")">
+        <span class="zone-name">@Node.Name</span>
+        <span class="zone-count">@Node.TotalSensors sensor@(Node.TotalSensors == 1 ? "" : "s")</span>
+        @if (Node.TotalAlerts > 0)
+        {
+            <span class="zone-alert">⚠ @Node.TotalAlerts</span>
+        }
+    </div>
+
+    @if (Node.Children.Count > 0)
+    {
+        <ul class="zone-list">
+            @foreach (var child in Node.Children)
+            {
+                <ZoneNode Node="child" />
+            }
+        </ul>
+    }
+</li>
+
+@code {
+    [Parameter, EditorRequired] public ZoneNodeDto Node { get; set; } = default!;
+}
