@@ -1,0 +1,669 @@
+@*
+//ST10440432
+//Matteo Nusca
+*@
+@page "/commands"
+@implements IDisposable
+@inject ApiClient Api
+@inject AppState State
+@using System.Globalization
+
+<PageTitle>Command Stream - Smart-X</PageTitle>
+
+<div class="page-header stream-header">
+    <div>
+        <h1>Real-Time Command Stream &amp; History</h1>
+        
+    </div>
+    <div class="conn @(connectionError is null ? "ok" : "bad")">
+        @if (connectionError is null)
+        {
+            <span>● Live</span>
+            @if (snapshot is not null)
+            {
+                <small>updated @snapshot.GeneratedUtc.ToLocalTime().ToString("HH:mm:ss")</small>
+            }
+        }
+        else
+        {
+            <span>● Reconnecting…</span>
+        }
+    </div>
+</div>
+
+@if (connectionError is not null)
+{
+    <div class="banner error">
+        <strong>Gateway unreachable.</strong> @connectionError Showing the last data received; retrying automatically.
+    </div>
+}
+
+@if (snapshot is null)
+{
+    <div class="card"><p class="muted">Connecting to the gateway…</p></div>
+}
+else
+{
+    var stats = snapshot.Stats;
+
+    <div class="tiles">
+        <div class="tile">
+            <span class="tile-label">FIFO queue</span>
+            <span class="tile-value">@stats.FifoDepth</span>
+            <span class="tile-sub">waiting · @stats.ProcessedFifo done</span>
+        </div>
+        <div class="tile @(stats.PriorityDepth > 0 ? "hot" : "")">
+            <span class="tile-label">Priority queue</span>
+            <span class="tile-value">@stats.PriorityDepth</span>
+            <span class="tile-sub">waiting · @stats.ProcessedPriority done</span>
+        </div>
+        <div class="tile">
+            <span class="tile-label">Avg latency</span>
+            <span class="tile-value small">@FormatMs(stats.AvgLatencyPriorityMs) <em>vs</em> @FormatMs(stats.AvgLatencyFifoMs)</span>
+            <span class="tile-sub">priority vs FIFO</span>
+        </div>
+        <div class="tile @(stats.ActiveAlerts > 0 ? "danger" : "")">
+            <span class="tile-label">Active alerts</span>
+            <span class="tile-value">@stats.ActiveAlerts</span>
+            <span class="tile-sub">unique (HashSet)</span>
+        </div>
+        <div class="tile">
+            <span class="tile-label">Duplicates blocked</span>
+            <span class="tile-value">@stats.DuplicatesSuppressed</span>
+            <span class="tile-sub">repeat alerts suppressed</span>
+        </div>
+        <div class="tile">
+            <span class="tile-label">Undo stack</span>
+            <span class="tile-value">@stats.UndoDepth</span>
+            <span class="tile-sub">commands reversible</span>
+        </div>
+    </div>
+
+    <div class="layout">
+        <div class="col-main">
+            <div class="card">
+                <div class="card-head">
+                    <h2>Devices <span class="count">@snapshot.Devices.Count of @snapshot.TotalDevices</span></h2>
+                </div>
+
+                <div class="filters">
+                    <input class="search" type="search" placeholder="Search name, MAC, location or category…"
+                           value="@State.Stream.Search" @oninput="OnSearchInput" @onchange="OnSearchCommitted" />
+                    <div class="chips">
+                        <button class="chip @(State.Stream.Category is null ? "on" : "")" @onclick="() => SetCategoryAsync(null)">All</button>
+                        <button class="chip @(State.Stream.Category == SensorCategory.Environmental ? "on" : "")" @onclick="() => SetCategoryAsync(SensorCategory.Environmental)">Environmental</button>
+                        <button class="chip @(State.Stream.Category == SensorCategory.PowerConsumption ? "on" : "")" @onclick="() => SetCategoryAsync(SensorCategory.PowerConsumption)">Power</button>
+                        <button class="chip @(State.Stream.Category == SensorCategory.Actuator ? "on" : "")" @onclick="() => SetCategoryAsync(SensorCategory.Actuator)">Actuators</button>
+                        <label class="toggle">
+                            <input type="checkbox" checked="@State.Stream.AlertsOnly" @onchange="OnAlertsOnlyChanged" /> Problems only
+                        </label>
+                    </div>
+                </div>
+
+                @if (snapshot.Devices.Count == 0)
+                {
+                    <p class="muted">No devices match the current filters.</p>
+                }
+                else
+                {
+                    <div class="device-grid">
+                        @foreach (var d in snapshot.Devices)
+                        {
+                            var device = d;
+                            <div class="device @StatusClass(device.Status) @(device.HasInsight ? "insight sev-" + (int)device.InsightSeverity : "") @(State.Stream.TimelineDeviceId == device.DeviceId ? "selected" : "")" @key="device.DeviceId">
+                                <div class="device-top">
+                                    <strong class="device-name">@device.DisplayName</strong>
+                                    <span class="status-tag @StatusClass(device.Status)">@StatusLabel(device.Status)</span>
+                                </div>
+                                <div class="mono device-id">@device.DeviceId</div>
+                                <div class="device-loc">@device.Location</div>
+
+                                <div class="device-reading">
+                                    @if (device.Category == SensorCategory.Actuator)
+                                    {
+                                        <span class="state-pill @(device.ActuatorOn == true ? "on" : "off")">@(device.ActuatorOn == true ? "ON" : "OFF")</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="reading">@device.LastValueText</span>
+                                    }
+                                    <span class="seen">@Ago(device.LastSeenUtc)</span>
+                                </div>
+
+                                @if (device.ActiveAlerts.Count > 0)
+                                {
+                                    <div class="alert-chips">
+                                        @foreach (var a in device.ActiveAlerts)
+                                        {
+                                            <span class="alert-chip">⚠ @a</span>
+                                        }
+                                    </div>
+                                }
+
+                                <div class="device-actions">
+                                    <button class="btn-small" @onclick="() => SelectDeviceAsync(device)">Timeline</button>
+                                    @if (device.Category == SensorCategory.Actuator)
+                                    {
+                                        <button class="btn-small go" disabled="@busy" @onclick="() => CommandAsync(device, CommandAction.TurnOn)">Turn ON</button>
+                                        <button class="btn-small stop" disabled="@busy" @onclick="() => CommandAsync(device, CommandAction.TurnOff)">Turn OFF</button>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+
+            @* --------------------------------------------------------------- timeline *@
+            <div class="card">
+                <div class="card-head">
+                    <h2>Telemetry Timeline</h2>
+                    <select class="select" value="@State.Stream.TimelineDeviceId" @onchange="OnTimelineDeviceChanged">
+                        @foreach (var d in snapshot.Devices)
+                        {
+                            <option value="@d.DeviceId">@d.DisplayName</option>
+                        }
+                    </select>
+                </div>
+
+                @{
+                    var selected = snapshot.Devices.FirstOrDefault(x => x.DeviceId == State.Stream.TimelineDeviceId);
+                    bool env = selected?.Category == SensorCategory.Environmental;
+                }
+                <TimelineChart Points="timeline"
+                               Title="@(selected?.DisplayName ?? "Reading")"
+                               LowLimit="@(env ? AnomalyRules.EnvironmentalLow : null)"
+                               HighLimit="@(env ? AnomalyRules.EnvironmentalHigh : null)" />
+            </div>
+
+            @* --------------------------------------------------------- pipeline log *@
+            <div class="card">
+                <h2>Pipeline Log <span class="count">most recent</span></h2>
+                @if (stats.Recent.Count == 0)
+                {
+                    <p class="muted">Nothing processed yet. Start simulator or use tools below.</p>
+                }
+                else
+                {
+                    <div class="table-wrap">
+                        <table class="log-table">
+                            <thead><tr><th>#</th><th>Lane</th><th>Device</th><th>Value</th><th>Latency</th><th>Note</th></tr></thead>
+                            <tbody>
+                                @foreach (var item in stats.Recent)
+                                {
+                                    <tr class="@(item.Lane == "Priority" ? "prio-row" : "")">
+                                        <td class="mono">@item.Sequence</td>
+                                        <td><span class="lane @(item.Lane == "Priority" ? "prio" : "fifo")">@item.Lane</span></td>
+                                        <td>@item.DeviceName</td>
+                                        <td class="mono">@item.Value</td>
+                                        <td class="mono">@FormatMs(item.LatencyMs)</td>
+                                        <td>@item.Reason</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <div class="col-side">
+
+            @* ------------------------------------------------------ suggested actions *@
+            <div class="card accent">
+                <h2>Suggested Actions</h2>
+                <p class="hint">Learned from @snapshot.Insights.EventsLearned events (@snapshot.Insights.PatternsKnown patterns).</p>
+
+                @if (snapshot.Insights.Suggestions.Count == 0)
+                {
+                    <p class="muted">No suggestions right now.</p>
+                }
+                else
+                {
+                    @foreach (var s in snapshot.Insights.Suggestions)
+                    {
+                        var suggestion = s;
+                        <div class="suggestion" @key="suggestion.Id">
+                            <div class="suggestion-title">@suggestion.Title</div>
+                            <div class="suggestion-reason">@suggestion.Reason</div>
+                            <div class="confidence"><span style="width:@(Pct(suggestion.Confidence))%"></span></div>
+                            <div class="suggestion-actions">
+                                <button class="btn-small go" disabled="@busy" @onclick="() => AcceptAsync(suggestion)">@(suggestion.Kind == "Command" ? "Do it" : "Show me")</button>
+                                <button class="btn-small" disabled="@busy" @onclick="() => DismissAsync(suggestion)">Dismiss</button>
+                            </div>
+                        </div>
+                    }
+                }
+            </div>
+
+            @* ------------------------------------------------------------- insights *@
+            <div class="card">
+                <h2>Automated Insights</h2>
+                @if (snapshot.Insights.Insights.Count == 0)
+                {
+                    <p class="muted">Everything looks healthy.</p>
+                }
+                else
+                {
+                    <ul class="insight-list">
+                        @foreach (var i in snapshot.Insights.Insights.Take(10))
+                        {
+                            <li class="sev-@((int)i.Severity)">
+                                <strong>@i.DeviceName</strong> <span class="kind">@i.Kind</span>
+                                <div>@i.Message</div>
+                            </li>
+                        }
+                    </ul>
+                }
+            </div>
+
+            @* ----------------------------------------------------------- command panel *@
+            <div class="card">
+                <h2>Manual Overrides</h2>
+                <div class="bulk">
+                    <input class="bulk-input" placeholder="filter, e.g. valve" value="@State.Stream.BulkFilter" @oninput="OnBulkFilterInput" />
+                    <button class="btn-small stop" disabled="@busy" @onclick="() => BulkAsync(CommandAction.TurnOff)">Shut down all</button>
+                    <button class="btn-small go" disabled="@busy" @onclick="() => BulkAsync(CommandAction.TurnOn)">Turn on all</button>
+                </div>
+                <button class="btn-undo" disabled="@(busy || stats.UndoDepth == 0)" @onclick="UndoAsync">
+                    ↶ Undo last command <span>(@stats.UndoDepth)</span>
+                </button>
+
+                @if (!string.IsNullOrEmpty(actionMessage))
+                {
+                    <p class="status-message @(actionIsError ? "error" : "success")">@actionMessage</p>
+                }
+
+                <h3 class="section-label">Command History</h3>
+                @if (snapshot.RecentCommands.Count == 0)
+                {
+                    <p class="muted">No commands yet.</p>
+                }
+                else
+                {
+                    <ul class="history">
+                        @foreach (var c in snapshot.RecentCommands)
+                        {
+                            <li class="@(c.Undone ? "undone" : "") @(c.Kind == "Undo" ? "is-undo" : "")">
+                                <span class="history-text">@c.Description</span>
+                                <span class="history-meta">@c.Source · @c.TimestampUtc.ToLocalTime().ToString("HH:mm:ss")</span>
+                            </li>
+                        }
+                    </ul>
+                }
+            </div>
+
+            @* ------------------------------------------------------------------ alerts *@
+            <div class="card">
+                <h2>Active Alerts <span class="count">@snapshot.Alerts.Count</span></h2>
+                @if (snapshot.Alerts.Count == 0)
+                {
+                    <p class="muted">No active alerts.</p>
+                }
+                else
+                {
+                    <ul class="alert-list">
+                        @foreach (var a in snapshot.Alerts.Take(12))
+                        {
+                            <li>
+                                <strong>@a.DeviceName</strong> <span class="kind">@a.Type</span>
+                                <div>@a.Message</div>
+                                <small>since @a.RaisedUtc.ToLocalTime().ToString("HH:mm:ss")</small>
+                            </li>
+                        }
+                    </ul>
+                    @if (snapshot.Alerts.Count > 12)
+                    {
+                        <p class="muted">…and @(snapshot.Alerts.Count - 12) more.</p>
+                    }
+                }
+            </div>
+
+            @* ----------------------------------------------------- simulation tools *@
+            <div class="card">
+                <h2>Demo Tools</h2>
+                <div class="sim-buttons">
+                    <button class="btn-small" disabled="@simBusy" @onclick="InjectPowerSpikeAsync"> Power spike on Smart Meter 3</button>
+                    <button class="btn-small" disabled="@simBusy" @onclick="InjectMoistureDropAsync"> Low moisture on Sensor 1</button>
+                    <button class="btn-small" disabled="@simBusy" @onclick="RepeatAlertAsync"> Repeat one alert ×5</button>
+                    <button class="btn-small" disabled="@simBusy" @onclick="FloodAsync"> Flood 300 packets + spike</button>
+                </div>
+                @if (!string.IsNullOrEmpty(simMessage))
+                {
+                    <p class="status-message @(simIsError ? "error" : "success")">@simMessage</p>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    //Ids of the seeded demo devices
+    private const string Moisture1 = "AA:BB:CC:00:00:01";
+    private const string Moisture2 = "AA:BB:CC:00:00:02";
+    private const string Meter3 = "AA:BB:CC:00:00:03";
+    private const string Meter4 = "AA:BB:CC:00:00:04";
+
+    private readonly CancellationTokenSource cts = new();
+    private StreamSnapshot? snapshot;
+    private List<TimelinePoint>? timeline;
+    private string? connectionError;
+    private bool refreshing;
+
+    private bool busy;
+    private string? actionMessage;
+    private bool actionIsError;
+
+    private bool simBusy;
+    private string? simMessage;
+    private bool simIsError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        snapshot = State.LastSnapshot; //instant render when returning from another pillar
+        await RefreshAsync();
+        _ = PollAsync(cts.Token);
+    }
+
+    private async Task PollAsync(CancellationToken ct)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(1500));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(ct))
+            {
+                await RefreshAsync();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            //navigated away
+        }
+    }
+
+    private async Task RefreshAsync()
+    {
+        if (refreshing) return;
+        refreshing = true;
+
+        try
+        {
+            var result = await Api.GetSnapshotAsync(State.Stream.Search, State.Stream.Category, State.Stream.AlertsOnly, cts.Token);
+
+            if (result.Ok && result.Data is not null)
+            {
+                snapshot = result.Data;
+                State.LastSnapshot = result.Data;
+                connectionError = null;
+
+                if (string.IsNullOrEmpty(State.Stream.TimelineDeviceId))
+                {
+                    State.Stream.TimelineDeviceId = (snapshot.Devices.FirstOrDefault(d => d.Status == DeviceStatus.Alert)
+                                                     ?? snapshot.Devices.FirstOrDefault())?.DeviceId;
+                }
+
+                await LoadTimelineAsync();
+            }
+            else
+            {
+                connectionError = result.Error;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        finally
+        {
+            refreshing = false;
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task LoadTimelineAsync()
+    {
+        if (string.IsNullOrEmpty(State.Stream.TimelineDeviceId))
+        {
+            timeline = null;
+            return;
+        }
+
+        var result = await Api.GetTimelineAsync(State.Stream.TimelineDeviceId, cts.Token);
+        if (result.Ok) timeline = result.Data;
+    }
+
+    // ------------------------------------------------------------ filters & search
+
+    private async Task OnSearchInput(ChangeEventArgs e)
+    {
+        State.Stream.Search = e.Value?.ToString() ?? string.Empty;
+        await RefreshAsync();
+    }
+
+    //Fires when the box loses focus / Enter is pressed
+    private async Task OnSearchCommitted(ChangeEventArgs e)
+    {
+        string term = e.Value?.ToString()?.Trim() ?? string.Empty;
+        State.Stream.Search = term;
+
+        if (term.Length >= 2) await Api.LogSearchAsync(term);
+
+        await RefreshAsync();
+    }
+
+    private async Task SetCategoryAsync(SensorCategory? category)
+    {
+        State.Stream.Category = category;
+        await RefreshAsync();
+    }
+
+    private async Task OnAlertsOnlyChanged(ChangeEventArgs e)
+    {
+        State.Stream.AlertsOnly = e.Value is true;
+        await RefreshAsync();
+    }
+
+    private async Task SelectDeviceAsync(DeviceState device)
+    {
+        State.Stream.TimelineDeviceId = device.DeviceId;
+        await Api.LogSearchAsync(device.DeviceId); //looking at a device is behaviour the engine learns from
+        await LoadTimelineAsync();
+        await RefreshAsync();
+    }
+
+    private async Task OnTimelineDeviceChanged(ChangeEventArgs e)
+    {
+        State.Stream.TimelineDeviceId = e.Value?.ToString();
+        await LoadTimelineAsync();
+    }
+
+    private void OnBulkFilterInput(ChangeEventArgs e) => State.Stream.BulkFilter = e.Value?.ToString() ?? string.Empty;
+
+    // ---------------------------------------------------------------- commands
+
+    private async Task CommandAsync(DeviceState device, CommandAction action)
+    {
+        busy = true;
+        var result = await Api.ExecuteAsync(new CommandRequest { DeviceId = device.DeviceId, Action = action });
+        Report(result.Ok, result.Ok ? result.Data?.Description ?? "Command sent." : result.Error);
+        busy = false;
+        await RefreshAsync();
+    }
+
+    private async Task BulkAsync(CommandAction action)
+    {
+        busy = true;
+        var result = await Api.ExecuteBulkAsync(new BulkCommandRequest { Filter = State.Stream.BulkFilter, Action = action });
+        Report(result.Ok, result.Ok ? result.Data?.Description ?? "Command sent." : result.Error);
+        busy = false;
+        await RefreshAsync();
+    }
+
+    private async Task UndoAsync()
+    {
+        busy = true;
+        var result = await Api.UndoAsync();
+        Report(result.Ok, result.Ok ? result.Data?.Description ?? "Undone." : result.Error);
+        busy = false;
+        await RefreshAsync();
+    }
+
+    private void Report(bool ok, string? message)
+    {
+        actionIsError = !ok;
+        actionMessage = message;
+    }
+
+    // ------------------------------------------------------------- suggestions
+
+    private async Task AcceptAsync(SuggestedAction s)
+    {
+        busy = true;
+
+        if (s.Kind == "Command" && s.Action is { } action)
+        {
+            var result = await Api.ExecuteAsync(new CommandRequest { DeviceId = s.DeviceId, Action = action, Source = "Suggested" });
+            Report(result.Ok, result.Ok ? result.Data?.Description ?? "Command sent." : result.Error);
+        }
+        else
+        {
+            State.Stream.TimelineDeviceId = s.DeviceId;
+            State.Stream.Search = s.DeviceName;
+            await Api.LogSearchAsync(s.DeviceId);
+            Report(true, $"Showing {s.DeviceName}.");
+        }
+
+        await Api.SendFeedbackAsync(s.Id, accepted: true);
+        busy = false;
+        await RefreshAsync();
+    }
+
+    private async Task DismissAsync(SuggestedAction s)
+    {
+        busy = true;
+        await Api.SendFeedbackAsync(s.Id, accepted: false);
+        busy = false;
+        await RefreshAsync();
+    }
+
+    // -------------------------------------------------------- simulation tools
+
+    private async Task InjectPowerSpikeAsync()
+    {
+        simBusy = true;
+        await Api.PostPowerAsync(Meter3, 500); //normal baseline
+        var r = await Api.PostPowerAsync(Meter3, 1700);
+        SimReport(r.Ok, r.Ok ? $"Smart Meter 3 spiked to 1700 W → {r.Data?.Lane} lane in {r.Data?.LatencyMs} ms." : r.Error);
+        simBusy = false;
+        await RefreshAsync();
+    }
+
+    private async Task InjectMoistureDropAsync()
+    {
+        simBusy = true;
+        await Api.PostEnvironmentalAsync(Moisture1, 45f); //clear any previous alert
+        var r = await Api.PostEnvironmentalAsync(Moisture1, 6f);
+        SimReport(r.Ok, r.Ok ? $"Moisture Sensor 1 reported 6 → {r.Data?.Lane} lane in {r.Data?.LatencyMs} ms. Check Suggested Actions." : r.Error);
+        simBusy = false;
+        await RefreshAsync();
+    }
+
+    private async Task RepeatAlertAsync()
+    {
+        simBusy = true;
+        for (int i = 0; i < 5; i++)
+        {
+            var r = await Api.PostEnvironmentalAsync(Moisture2, 96f);
+            if (!r.Ok)
+            {
+                SimReport(false, r.Error);
+                simBusy = false;
+                return;
+            }
+        }
+
+        SimReport(true, "Sent the same out-of-range reading 5 times. The alert is raised once; repeats are counted under “Duplicates blocked”.");
+        simBusy = false;
+        await RefreshAsync();
+    }
+
+    private async Task FloodAsync()
+    {
+        simBusy = true;
+        var rng = new Random();
+
+        await Api.PostPowerAsync(Meter4, 300); //baseline
+
+        var readings = Enumerable.Range(0, 300)
+            .Select(i => new BatchReading { DeviceId = i % 2 == 0 ? Moisture1 : Moisture2, Value = 40 + rng.Next(20) })
+            .ToList();
+
+        var batch = await Api.PostBatchAsync(readings);
+        if (!batch.Ok)
+        {
+            SimReport(false, batch.Error);
+            simBusy = false;
+            return;
+        }
+
+        await Task.Delay(300);
+        var spike = await Api.PostPowerAsync(Meter4, 1800); //critical packet arrives while the FIFO backlog is draining
+
+        SimReport(spike.Ok,
+            spike.Ok
+                ? $"Sent {batch.Data?.Accepted} normal packets, then a critical spike. The spike took the {spike.Data?.Lane} lane and finished in {spike.Data?.LatencyMs} ms, ahead of the backlog."
+                : spike.Error);
+
+        simBusy = false;
+        await RefreshAsync();
+    }
+
+    private void SimReport(bool ok, string? message)
+    {
+        simIsError = !ok;
+        simMessage = message;
+    }
+
+    // ----------------------------------------------------------------- helpers
+
+    private static string StatusClass(DeviceStatus s) => s switch
+    {
+        DeviceStatus.Live => "st-live",
+        DeviceStatus.Stale => "st-stale",
+        DeviceStatus.NoData => "st-nodata",
+        DeviceStatus.Alert => "st-alert",
+        _ => "st-disc"
+    };
+
+    private static string StatusLabel(DeviceStatus s) => s switch
+    {
+        DeviceStatus.Live => "Live",
+        DeviceStatus.Stale => "Stale",
+        DeviceStatus.NoData => "No data",
+        DeviceStatus.Alert => "Alert",
+        _ => "Disconnected"
+    };
+
+    private static string Ago(DateTime? utc)
+    {
+        if (utc is null) return "never";
+        var span = DateTime.UtcNow - utc.Value;
+        if (span.TotalSeconds < 2) return "just now";
+        if (span.TotalSeconds < 60) return $"{(int)span.TotalSeconds}s ago";
+        if (span.TotalMinutes < 60) return $"{(int)span.TotalMinutes}m ago";
+        return $"{(int)span.TotalHours}h ago";
+    }
+
+    private static string FormatMs(double ms) => ms < 1000
+        ? $"{ms.ToString("0.#", CultureInfo.InvariantCulture)} ms"
+        : $"{(ms / 1000).ToString("0.0", CultureInfo.InvariantCulture)} s";
+
+    private static string Pct(double confidence) =>
+        Math.Clamp(confidence * 100, 0, 100).ToString("0", CultureInfo.InvariantCulture);
+
+    public void Dispose()
+    {
+        cts.Cancel(); //not disposed
+    }
+}
