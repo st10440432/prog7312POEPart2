@@ -189,7 +189,7 @@ curl http://localhost:5248/api/sensors/AA:BB:CC:00:00:06
 
 ### SortedDictionary – timelines
 
-Pick any device under **Telemetry Timeline**; the points are already ordered by time. ⌨:
+Pick any device under **Telemetry Timeline**; the points are already ordered by time:
 
 ```bash
 curl "http://localhost:5248/api/telemetry/AA:BB:CC:00:00:02/history?minutes=30&max=100"
