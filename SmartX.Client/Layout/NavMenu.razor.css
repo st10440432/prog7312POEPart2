@@ -58,3 +58,23 @@
     color: #6b7290;
     border-top: 1px solid rgba(255,255,255,0.08);
 }
+
+.nav-link.disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+    .nav-link.disabled:hover {
+        background: transparent;
+        color: #c3c8dd;
+    }
+
+.nav-soon {
+    margin-left: auto;
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.1rem 0.4rem;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.12);
+}
