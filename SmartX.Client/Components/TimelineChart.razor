@@ -1,0 +1,115 @@
+@*
+//ST10440432
+//Matteo Nusca
+*@
+@using System.Globalization
+
+<div class="timeline">
+    @if (Points is null || Points.Count < 2)
+    {
+        <p class="timeline-empty">Not enough readings yet to draw a timeline.</p>
+    }
+    else
+    {
+        <svg viewBox="0 0 @Width @Height" preserveAspectRatio="none" role="img" aria-label="@Title timeline">
+            @foreach (var tick in Ticks())
+            {
+                <g>
+                    <line x1="@PadLeft" x2="@(Width - PadRight)" y1="@Fmt(Y(tick))" y2="@Fmt(Y(tick))" class="grid" />
+                    <text x="@(PadLeft - 6)" y="@Fmt(Y(tick) + 4)" class="axis" text-anchor="end">@tick.ToString("0.#", CultureInfo.InvariantCulture)</text>
+                </g>
+            }
+
+            @if (LowLimit is not null)
+            {
+                <line x1="@PadLeft" x2="@(Width - PadRight)" y1="@Fmt(Y(LowLimit.Value))" y2="@Fmt(Y(LowLimit.Value))" class="limit" />
+            }
+            @if (HighLimit is not null)
+            {
+                <line x1="@PadLeft" x2="@(Width - PadRight)" y1="@Fmt(Y(HighLimit.Value))" y2="@Fmt(Y(HighLimit.Value))" class="limit" />
+            }
+
+            <polyline points="@PolylinePoints()" class="series" fill="none" />
+
+            @foreach (var (p, index) in Points.Select((p, i) => (p, i)))
+            {
+                bool breach = IsBreach(p.Value);
+                if (breach || index == Points.Count - 1)
+                {
+                    <circle cx="@Fmt(X(index))" cy="@Fmt(Y(p.Value))" r="@(breach ? 4 : 3.5)" class="@(breach ? "dot breach" : "dot last")" />
+                }
+            }
+
+            <text x="@PadLeft" y="@(Height - 4)" class="axis" text-anchor="start">@Points[0].TimestampUtc.ToLocalTime().ToString("HH:mm:ss")</text>
+            <text x="@(Width - PadRight)" y="@(Height - 4)" class="axis" text-anchor="end">@Points[^1].TimestampUtc.ToLocalTime().ToString("HH:mm:ss")</text>
+        </svg>
+        <div class="timeline-legend">
+            <span><i class="sw series-sw"></i> @Title</span>
+            @if (LowLimit is not null || HighLimit is not null)
+            {
+                <span><i class="sw limit-sw"></i> safe range limits</span>
+                <span><i class="sw breach-sw"></i> outside range</span>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public IReadOnlyList<TimelinePoint>? Points { get; set; }
+    [Parameter] public string Title { get; set; } = "Reading";
+    [Parameter] public double? LowLimit { get; set; }
+    [Parameter] public double? HighLimit { get; set; }
+
+    private const double Width = 640;
+    private const double Height = 190;
+    private const double PadLeft = 40;
+    private const double PadRight = 12;
+    private const double PadTop = 12;
+    private const double PadBottom = 22;
+
+    private double min, max;
+
+    protected override void OnParametersSet()
+    {
+        if (Points is null || Points.Count == 0)
+        {
+            min = 0;
+            max = 1;
+            return;
+        }
+
+        min = Points.Min(p => p.Value);
+        max = Points.Max(p => p.Value);
+        if (LowLimit is not null) min = Math.Min(min, LowLimit.Value);
+        if (HighLimit is not null) max = Math.Max(max, HighLimit.Value);
+
+        if (Math.Abs(max - min) < 0.0001)
+        {
+            min -= 1;
+            max += 1;
+        }
+
+        double margin = (max - min) * 0.08;
+        min -= margin;
+        max += margin;
+    }
+
+    private double X(int index) =>
+        PadLeft + (Width - PadLeft - PadRight) * index / Math.Max(1, Points!.Count - 1);
+
+    private double Y(double value) =>
+        PadTop + (Height - PadTop - PadBottom) * (1 - (value - min) / (max - min));
+
+    private string PolylinePoints() =>
+        string.Join(" ", Points!.Select((p, i) => $"{Fmt(X(i))},{Fmt(Y(p.Value))}"));
+
+    private bool IsBreach(double value) =>
+        (LowLimit is not null && value < LowLimit.Value) || (HighLimit is not null && value > HighLimit.Value);
+
+    private IEnumerable<double> Ticks()
+    {
+        for (int i = 0; i <= 3; i++) yield return min + (max - min) * i / 3.0;
+    }
+
+    private static string Fmt(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
+}
