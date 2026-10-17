@@ -4,6 +4,7 @@
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using SmartX.Client;
+using SmartX.Client.Services;
 
 var builder = WebAssemblyHostBuilder.CreateDefault(args);
 
@@ -18,5 +19,8 @@ builder.Services.AddScoped(sp =>
     {
         BaseAddress = new Uri(apiBaseUrl)
     });
+
+builder.Services.AddScoped<ApiClient>();
+builder.Services.AddSingleton<AppState>();
 
 await builder.Build().RunAsync();
