@@ -1,12 +1,13 @@
-﻿@*
+@*
 //ST10440432
 //Matteo Nusca
 *@
 @page "/sensors"
+@implements IDisposable
 @inject HttpClient Http
-@using SmartX.Shared.Models
-@using System.Net.Http.Json
-@using Microsoft.AspNetCore.Components.Forms
+@inject ApiClient Api
+@inject AppState State
+@using System.Globalization
 
 <PageTitle>Sensor Data Ingestion - Smart-X</PageTitle>
 
@@ -14,6 +15,11 @@
     <h1>Sensor Data Ingestion &amp; Telemetry</h1>
     <p>Register devices, ingest telemetry, and monitor readings with proactive anomaly highlighting.</p>
 </div>
+
+@if (!string.IsNullOrEmpty(loadError))
+{
+    <p class="status-message error">@loadError</p>
+}
 
 <div class="card">
     <h2>Register a Sensor</h2>
@@ -25,6 +31,11 @@
             <div class="form-row">
                 <label>Device MAC / Unique ID</label>
                 <InputText @bind-Value="newSensor.DeviceId" placeholder="e.g. AA:BB:CC:DD:EE:01" />
+            </div>
+
+            <div class="form-row">
+                <label>Friendly Name (optional)</label>
+                <InputText @bind-Value="newSensor.FriendlyName" placeholder="e.g. Pump C" />
             </div>
 
             <div class="form-row">
@@ -69,6 +80,7 @@
         <table class="sensor-table">
             <thead>
                 <tr>
+                    <th>Name</th>
                     <th>Device ID</th>
                     <th>Location</th>
                     <th>Category</th>
@@ -78,6 +90,7 @@
                 @foreach (var sensor in sensors)
                 {
                     <tr>
+                        <td>@(sensor.FriendlyName ?? "-")</td>
                         <td class="mono">@sensor.DeviceId</td>
                         <td>@sensor.DeploymentLocation</td>
                         <td><span class="category-pill">@sensor.Category</span></td>
@@ -92,11 +105,27 @@
             {
                 var status = SensorStatus(sensor);
                 <div class="status-badge @status">
-                    <strong class="mono">@sensor.DeviceId</strong>
+                    <strong>@sensor.DisplayName</strong>
                     <span>@SensorStatusLabel(status)</span>
                 </div>
             }
         </div>
+    }
+</div>
+
+<div class="card">
+    <h2>Deployment Hierarchy</h2>
+    <p class="hint">Every sensor's location is parsed into a Facility → Zone → Node tree, validated recursively on registration and rolled up recursively here.</p>
+
+    @if (zones is null)
+    {
+        <p class="muted">Loading...</p>
+    }
+    else
+    {
+        <ul class="zone-tree">
+            <ZoneNode Node="zones" />
+        </ul>
     }
 </div>
 
@@ -111,7 +140,7 @@
                 {
                     @foreach (var sensor in sensors)
                     {
-                        <option value="@sensor.DeviceId">@sensor.DeviceId (@sensor.Category)</option>
+                        <option value="@sensor.DeviceId">@sensor.DisplayName - @sensor.DeviceId (@sensor.Category)</option>
                     }
                 }
             </select>
@@ -206,7 +235,7 @@
                 {
                     @foreach (var sensor in sensors)
                     {
-                        <option value="@sensor.DeviceId">@sensor.DeviceId</option>
+                        <option value="@sensor.DeviceId">@sensor.DisplayName - @sensor.DeviceId</option>
                     }
                 }
             </select>
@@ -247,26 +276,42 @@
 </div>
 
 @code {
-    private const float EnvironmentalLowThreshold = 15f;
-    private const float EnvironmentalHighThreshold = 85f;
-    private const int PowerSpikeThresholdWatts = 500;
-    private static readonly TimeSpan StaleAfter = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan StaleAfter = AnomalyRules.DefaultStaleAfter;
     private const long MaxUploadFileSize = 10 * 1024 * 1024; // 10 MB cap
 
-    private SensorRegistration newSensor = new();
+    private readonly CancellationTokenSource cts = new();
+
+    //Drafts live in AppState so they survive navigating to another pillar and back
+    private SensorRegistration newSensor => State.Sensors.NewSensor;
+    private string? selectedDeviceId
+    {
+        get => State.Sensors.TelemetryDeviceId;
+        set => State.Sensors.TelemetryDeviceId = value;
+    }
+    private string telemetryValueInput
+    {
+        get => State.Sensors.TelemetryValue;
+        set => State.Sensors.TelemetryValue = value ?? string.Empty;
+    }
+    private string? uploadDeviceId
+    {
+        get => State.Sensors.UploadDeviceId;
+        set => State.Sensors.UploadDeviceId = value;
+    }
+
     private List<SensorRegistration>? sensors;
+    private ZoneNodeDto? zones;
+    private TelemetryDashboardResponse? dashboard;
+    private string? loadError;
+
     private bool isRegistering;
     private string? statusMessage;
     private bool statusIsError;
 
-    private string? selectedDeviceId;
-    private string telemetryValueInput = string.Empty;
     private bool isSubmittingTelemetry;
     private string? telemetryStatusMessage;
     private bool telemetryStatusIsError;
-    private TelemetryDashboardResponse? dashboard;
 
-    private string? uploadDeviceId;
     private IBrowserFile? selectedFile;
     private bool isUploading;
     private string? uploadStatusMessage;
@@ -275,18 +320,40 @@
 
     protected override async Task OnInitializedAsync()
     {
-        await LoadSensorsAsync();
-        await LoadTelemetryAsync();
+        await RefreshAsync();
+        if (!string.IsNullOrWhiteSpace(uploadDeviceId)) await LoadAttachedFilesAsync();
+
+        _ = PollAsync(cts.Token); //keep the dashboard live
     }
 
-    private async Task LoadSensorsAsync()
+    private async Task PollAsync(CancellationToken ct)
     {
-        sensors = await Http.GetFromJsonAsync<List<SensorRegistration>>("api/sensors");
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(ct))
+            {
+                await RefreshAsync();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            //page was left
+        }
     }
 
-    private async Task LoadTelemetryAsync()
+    private async Task RefreshAsync()
     {
-        dashboard = await Http.GetFromJsonAsync<TelemetryDashboardResponse>("api/telemetry");
+        var sensorsResult = await Api.GetSensorsAsync();
+        var telemetryResult = await Api.GetTelemetryAsync();
+        var zonesResult = await Api.GetZonesAsync();
+
+        if (sensorsResult.Ok) sensors = sensorsResult.Data;
+        if (telemetryResult.Ok) dashboard = telemetryResult.Data;
+        if (zonesResult.Ok) zones = zonesResult.Data;
+
+        loadError = sensorsResult.Ok && telemetryResult.Ok ? null : (sensorsResult.Error ?? telemetryResult.Error);
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task RegisterSensorAsync()
@@ -294,23 +361,33 @@
         isRegistering = true;
         statusMessage = null;
 
-        var response = await Http.PostAsJsonAsync("api/sensors", newSensor);
+        try
+        {
+            var response = await Http.PostAsJsonAsync("api/sensors", newSensor);
 
-        if (response.IsSuccessStatusCode)
-        {
-            statusMessage = $"Sensor '{newSensor.DeviceId}' registered successfully.";
-            statusIsError = false;
-            newSensor = new SensorRegistration();
-            await LoadSensorsAsync();
+            if (response.IsSuccessStatusCode)
+            {
+                statusMessage = $"Sensor '{newSensor.DeviceId}' registered successfully.";
+                statusIsError = false;
+                State.Sensors.NewSensor = new SensorRegistration();
+                await RefreshAsync();
+            }
+            else
+            {
+                var error = (await response.Content.ReadAsStringAsync()).Trim('"');
+                statusMessage = $"Failed to register sensor: {error}";
+                statusIsError = true;
+            }
         }
-        else
+        catch (HttpRequestException)
         {
-            var error = await response.Content.ReadAsStringAsync();
-            statusMessage = $"Failed to register sensor: {error}";
+            statusMessage = "Failed to register sensor: cannot reach the gateway API.";
             statusIsError = true;
         }
-
-        isRegistering = false;
+        finally
+        {
+            isRegistering = false;
+        }
     }
 
     private async Task SubmitTelemetryAsync()
@@ -332,75 +409,73 @@
             return;
         }
 
+        string raw = telemetryValueInput.Trim().Replace(',', '.');
         isSubmittingTelemetry = true;
-        HttpResponseMessage response;
+        ApiResult<IngestResponse> result;
 
         switch (sensor.Category)
         {
             case SensorCategory.Environmental:
-                if (!float.TryParse(telemetryValueInput, out var floatValue))
+                if (!float.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var floatValue))
                 {
-                    telemetryStatusMessage = "Environmental readings must be a decimal number (e.g. 42.5).";
-                    telemetryStatusIsError = true;
-                    isSubmittingTelemetry = false;
+                    FailTelemetry("Environmental readings must be a decimal number (e.g. 42.5).");
                     return;
                 }
-                response = await Http.PostAsJsonAsync("api/telemetry/environmental",
-                    new TelemetryIngestRequest<float>(sensor.DeviceId, floatValue));
+                result = await Api.PostEnvironmentalAsync(sensor.DeviceId, floatValue);
                 break;
 
             case SensorCategory.PowerConsumption:
-                if (!int.TryParse(telemetryValueInput, out var intValue))
+                if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var intValue))
                 {
-                    telemetryStatusMessage = "Power readings must be a whole number of watts (e.g. 1500).";
-                    telemetryStatusIsError = true;
-                    isSubmittingTelemetry = false;
+                    FailTelemetry("Power readings must be a whole number of watts (e.g. 1500).");
                     return;
                 }
-                response = await Http.PostAsJsonAsync("api/telemetry/power",
-                    new TelemetryIngestRequest<int>(sensor.DeviceId, intValue));
+                result = await Api.PostPowerAsync(sensor.DeviceId, intValue);
                 break;
 
             case SensorCategory.Actuator:
-                if (!bool.TryParse(telemetryValueInput, out var boolValue))
+                if (!bool.TryParse(raw, out var boolValue))
                 {
-                    telemetryStatusMessage = "Actuator readings must be 'true' or 'false'.";
-                    telemetryStatusIsError = true;
-                    isSubmittingTelemetry = false;
+                    FailTelemetry("Actuator readings must be 'true' or 'false'.");
                     return;
                 }
-                response = await Http.PostAsJsonAsync("api/telemetry/actuator",
-                    new TelemetryIngestRequest<bool>(sensor.DeviceId, boolValue));
+                result = await Api.PostActuatorAsync(sensor.DeviceId, boolValue);
                 break;
 
             default:
-                telemetryStatusMessage = "Unknown sensor category.";
-                telemetryStatusIsError = true;
-                isSubmittingTelemetry = false;
+                FailTelemetry("Unknown sensor category.");
                 return;
         }
 
-        if (response.IsSuccessStatusCode)
+        if (result.Ok)
         {
-            telemetryStatusMessage = $"Reading recorded for {sensor.DeviceId}.";
+            string lane = result.Data is { Lane: "Priority" }
+                ? $" Critical reading - priority lane ({result.Data.Reason})."
+                : string.Empty;
+            telemetryStatusMessage = $"Reading recorded for {sensor.DisplayName}.{lane}";
             telemetryStatusIsError = false;
             telemetryValueInput = string.Empty;
-            await LoadTelemetryAsync();
+            await RefreshAsync();
         }
         else
         {
-            var error = await response.Content.ReadAsStringAsync();
-            telemetryStatusMessage = $"Failed to submit reading: {error}";
+            telemetryStatusMessage = $"Failed to submit reading: {result.Error}";
             telemetryStatusIsError = true;
         }
 
         isSubmittingTelemetry = false;
     }
 
-    //Proactive Anomaly / Alert Highlighting
+    private void FailTelemetry(string message)
+    {
+        telemetryStatusMessage = message;
+        telemetryStatusIsError = true;
+        isSubmittingTelemetry = false;
+    }
 
-    private bool IsEnvironmentalAnomaly(float value) =>
-        value < EnvironmentalLowThreshold || value > EnvironmentalHighThreshold;
+    //Proactive Anomaly / Alert Highlighting (thresholds come from the shared AnomalyRules)
+
+    private bool IsEnvironmentalAnomaly(float value) => AnomalyRules.IsEnvironmentalAnomaly(value);
 
     private bool IsPowerSpike(TelemetryPacket<int> reading)
     {
@@ -413,11 +488,10 @@
 
         if (previous is null) return false;
 
-        var currentMeter = new PowerMeterReading(reading.DeviceId, reading.Value);
-        var previousMeter = new PowerMeterReading(previous.DeviceId, previous.Value);
-        double delta = currentMeter - previousMeter;
-
-        return Math.Abs(delta) > PowerSpikeThresholdWatts;
+        //Uses the overloaded '-' operator on NumericTelemetryPacket<int> (current - previous = signed delta in watts)
+        return AnomalyRules.IsPowerSpike(
+            NumericTelemetryPacket<int>.From(reading),
+            NumericTelemetryPacket<int>.From(previous));
     }
 
     private string SensorStatus(SensorRegistration sensor)
@@ -479,7 +553,7 @@
                 string.IsNullOrEmpty(selectedFile.ContentType) ? "application/octet-stream" : selectedFile.ContentType);
             content.Add(streamContent, "file", selectedFile.Name);
 
-            var response = await Http.PostAsync($"api/sensors/{uploadDeviceId}/files", content);
+            var response = await Http.PostAsync($"api/sensors/{Uri.EscapeDataString(uploadDeviceId)}/files", content);
 
             if (response.IsSuccessStatusCode)
             {
@@ -510,6 +584,19 @@
     {
         attachedFiles = null;
         if (string.IsNullOrWhiteSpace(uploadDeviceId)) return;
-        attachedFiles = await Http.GetFromJsonAsync<List<string>>($"api/sensors/{uploadDeviceId}/files");
+
+        try
+        {
+            attachedFiles = await Http.GetFromJsonAsync<List<string>>($"api/sensors/{Uri.EscapeDataString(uploadDeviceId)}/files");
+        }
+        catch (HttpRequestException)
+        {
+            attachedFiles = new List<string>();
+        }
+    }
+
+    public void Dispose()
+    {
+        cts.Cancel(); //not disposed: an in-flight refresh may still read cts.Token after we leave the page
     }
 }
