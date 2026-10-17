@@ -10,6 +10,11 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
+      # Gateway tuning
+      Gateway__ProcessingDelayMs: "5"
+      Gateway__StaleAfterSeconds: "60"
+    volumes:
+      - smartx-uploads:/app/Uploads
 
   smartx-client:
     build:
@@ -20,3 +25,20 @@ services:
       - "8081:80"
     depends_on:
       - smartx-api
+
+  # Optional device fleet. Start it with:  docker compose --profile sim up --build
+  # Pick a scenario with SIM_SCENARIO=demo (default: normal).
+  smartx-simulator:
+    build:
+      context: .
+      dockerfile: SmartX.Simulator/Dockerfile
+    container_name: smartx-simulator
+    profiles: ["sim"]
+    environment:
+      SIM_API_URL: http://smartx-api:8080
+      SIM_SCENARIO: ${SIM_SCENARIO:-normal}
+    depends_on:
+      - smartx-api
+
+volumes:
+  smartx-uploads:
