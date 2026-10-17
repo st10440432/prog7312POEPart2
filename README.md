@@ -362,8 +362,11 @@ SmartX.Client/
   Services/                    ApiClient, AppState
   Layout/                      NavMenu, MainLayout (error boundary)
 SmartX.Simulator/              Device fleet + scenarios
-docs/DEMO_SCRIPT.md            Walk-through for the demo video
 ```
+## AI USAGE DECLARATION
+Claude AI was used to assist in the generation of this readme along with the steps to run and test the program, this information was provided by me, Claude simply put it into readable .md format and all output was reviewed extensively by myself, st10440432, to ensure accuracy and legibility. I also requested it to generate the graph above as a nice visual cue for the application flow. 
+
+Claude AI was used in the code to assist with complex calculation and algorithm generation, like the one for suggested actions. I also made use of Claude heavily to create and troubleshoot the simulation tool for the project, ensuring that data remains realistic while also functioning correctly when an abnormality is pushed. Claude was also used in the frontend to assist with overall layout. Main code was all written by myself, st10440432, with Claude used to assist with troubleshooting errors as they arose.
 
 ## Troubleshooting
 
