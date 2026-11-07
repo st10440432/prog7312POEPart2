@@ -7,4 +7,5 @@
   <Project Path="SmartX.Client/SmartX.Client.csproj" />
   <Project Path="SmartX.Shared/SmartX.Shared.csproj" />
   <Project Path="SmartX.Simulator/SmartX.Simulator.csproj" />
+  <Project Path="SmartX.Tests/SmartX.Tests.csproj" />
 </Solution>
