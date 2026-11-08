@@ -8,7 +8,7 @@ Smart-X is a simulated IoT gateway. Devices (ESP32-style sensors, smart plugs, p
 |---|---|
 | 1. Sensor Data Ingestion & Telemetry (Part 1) | Working, still available from menu |
 | 2. Real-Time Command Stream & History (Part 2) |  **This submission** |
-| 3. Network Topology & Mesh Routing (Part 3) | Greyed out until the final PoE |
+| 3. Network Topology & Mesh Routing (Part 3) | Mesh map, routing, failure simulation and history search |
 
 ---
 ## VIDEO LINK
