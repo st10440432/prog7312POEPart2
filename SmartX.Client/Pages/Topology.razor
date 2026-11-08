@@ -1,0 +1,683 @@
+@*
+//ST10440432
+//Matteo Nusca
+*@
+@page "/topology"
+@implements IDisposable
+@inject ApiClient Api
+@inject AppState State
+@using System.Globalization
+
+<PageTitle>Network Topology - Smart-X</PageTitle>
+
+<div class="page-header topo-header">
+    <div>
+        <h1>Network Topology &amp; Mesh Routing</h1>
+        <p>The sensors form a mesh. Every link has a power cost, and each reading hops towards the gateway along the cheapest route. Fail a node to watch routes heal.</p>
+    </div>
+    <div class="conn @(connectionError is null ? "ok" : "bad")">
+        @if (connectionError is null)
+        {
+            <span>● Live</span>
+            @if (mesh is not null)
+            {
+                <small>updated @mesh.GeneratedUtc.ToLocalTime().ToString("HH:mm:ss")</small>
+            }
+        }
+        else
+        {
+            <span>● Reconnecting…</span>
+        }
+    </div>
+</div>
+
+@if (connectionError is not null)
+{
+    <div class="banner error">
+        <strong>Gateway unreachable.</strong> @connectionError Showing the last data received; retrying automatically.
+    </div>
+}
+
+@if (mesh is null)
+{
+    <div class="card"><p class="muted">Connecting to the gateway…</p></div>
+}
+else
+{
+    <div class="tiles">
+        <div class="tile">
+            <span class="tile-label">Nodes</span>
+            <span class="tile-value">@(mesh.Nodes.Count - 1)</span>
+            <span class="tile-sub">sensors + 1 gateway · @mesh.Links.Count links</span>
+        </div>
+        <div class="tile ok">
+            <span class="tile-label">Up</span>
+            <span class="tile-value">@mesh.UpCount</span>
+            <span class="tile-sub">can reach the gateway</span>
+        </div>
+        <div class="tile @(mesh.DownCount > 0 ? "danger" : "")">
+            <span class="tile-label">Down</span>
+            <span class="tile-value">@mesh.DownCount</span>
+            <span class="tile-sub">failed or silent</span>
+        </div>
+        <div class="tile @(mesh.IsolatedCount > 0 ? "hot" : "")">
+            <span class="tile-label">Isolated</span>
+            <span class="tile-value">@mesh.IsolatedCount</span>
+            <span class="tile-sub">alive but cut off</span>
+        </div>
+        <div class="tile">
+            <span class="tile-label">Spanning tree</span>
+            <span class="tile-value small">@Mw(mesh.MstTotalMilliwatts) <em>of</em> @Mw(mesh.AllLinksTotalMilliwatts)</span>
+            <span class="tile-sub">@mesh.MstLinkCount links keep everyone joined</span>
+        </div>
+    </div>
+
+    <div class="layout">
+        <div class="card">
+            <div class="card-head">
+                <h2>Mesh map</h2>
+                <div class="chips">
+                    <button class="chip @(State.Topology.RouteMode == "cheapest" ? "on" : "")" @onclick='() => SetRouteMode("cheapest")'>Cheapest route</button>
+                    <button class="chip @(State.Topology.RouteMode == "hops" ? "on" : "")" @onclick='() => SetRouteMode("hops")'>Fewest hops</button>
+                    <button class="chip @(State.Topology.RouteMode == "mst" ? "on" : "")" @onclick='() => SetRouteMode("mst")'>Spanning tree route</button>
+                </div>
+            </div>
+            <label class="check">
+                <input type="checkbox" checked="@State.Topology.MstOnly" @onchange="OnMstOnlyChanged" /> Show only spanning tree links
+            </label>
+
+            <svg class="map" viewBox="0 0 @Width @Height" role="img" aria-label="Mesh network map">
+                @foreach (var link in mesh.Links)
+                {
+                    if (!layout.TryGetValue(link.From, out var a) || !layout.TryGetValue(link.To, out var b)) continue;
+
+                    bool onRoute = routeLinks.Contains(PairKey(link.From, link.To));
+                    if (State.Topology.MstOnly && !link.InMst && !onRoute) continue;
+
+                    bool dead = IsDown(link.From) || IsDown(link.To);
+                    bool showCost = onRoute || (link.InMst && mesh.Nodes.Count <= 13);
+                    string linkClass = "link" + (link.InMst ? " mst" : "") + (onRoute ? " route" : "") + (dead ? " dead" : "");
+                    string costClass = onRoute ? "cost route" : "cost";
+                    string linkKey = link.From + "|" + link.To;
+
+                    <g @key="linkKey">
+                        <line x1="@Fmt(a.X)" y1="@Fmt(a.Y)" x2="@Fmt(b.X)" y2="@Fmt(b.Y)" class="@linkClass">
+                            <title>@NameOf(link.From) ↔ @NameOf(link.To): @Mw(link.CostMilliwatts)@(link.InMst ? " (spanning tree)" : "")</title>
+                        </line>
+                        @if (showCost)
+                        {
+                            <g>
+                                <text x="@Fmt((a.X + b.X) / 2)" y="@Fmt((a.Y + b.Y) / 2 - 3)" class="@costClass" text-anchor="middle">@link.CostMilliwatts.ToString("0.#", CultureInfo.InvariantCulture)</text>
+                            </g>
+                        }
+                    </g>
+                }
+
+                @foreach (var node in mesh.Nodes)
+                {
+                    if (!layout.TryGetValue(node.Id, out var p)) continue;
+
+                    string id = node.Id;
+                    bool isGateway = node.Kind == "Gateway";
+                    bool isSelected = id == State.Topology.SelectedNodeId;
+                    string nodeClass = "node st-" + node.Status.ToLowerInvariant() + (isSelected ? " selected" : "") + (isGateway ? " gateway" : "");
+
+                    <g class="@nodeClass" @onclick="() => Select(id)" @key="id">
+                        <title>@node.Name · @node.Status@(node.DownReason is null ? "" : " (" + node.DownReason + ")")@(node.HopsToGateway is null ? "" : " · " + node.HopsToGateway + " hop(s) to gateway")</title>
+                        @if (isGateway)
+                        {
+                            <g>
+                                <rect x="@Fmt(p.X - 22)" y="@Fmt(p.Y - 16)" width="44" height="32" rx="7" class="shape" />
+                                <text x="@Fmt(p.X)" y="@Fmt(p.Y + 4)" class="badge" text-anchor="middle">GW</text>
+                            </g>
+                        }
+                        else
+                        {
+                            <g>
+                                <circle cx="@Fmt(p.X)" cy="@Fmt(p.Y)" r="15" class="shape" />
+                                <text x="@Fmt(p.X)" y="@Fmt(p.Y + 4)" class="badge" text-anchor="middle">@(node.Status == "Down" ? "✕" : Badge(node.Id))</text>
+                                <text x="@Fmt(p.X)" y="@Fmt(p.Y + 29)" class="label" text-anchor="middle">@Short(node.Name)</text>
+                                @if (node.HasActiveAlert)
+                                {
+                                    <circle cx="@Fmt(p.X + 12)" cy="@Fmt(p.Y - 12)" r="4.5" class="alert-dot" />
+                                }
+                            </g>
+                        }
+                    </g>
+                }
+            </svg>
+
+            <div class="legend">
+                <span><i class="dot up"></i> up</span>
+                <span><i class="dot down"></i> down</span>
+                <span><i class="dot iso"></i> isolated</span>
+                <span><i class="bar mst"></i> spanning tree link</span>
+                <span><i class="bar route"></i> selected route</span>
+                <span><i class="dot alert"></i> active alert</span>
+            </div>
+            <p class="hint">Numbers on a link are its power cost in mW. Click a node to inspect it.</p>
+        </div>
+
+        <div class="side">
+            <div class="card">
+                @if (selected is null)
+                {
+                    <h2>Node</h2>
+                    <p class="muted">Select a node on the map.</p>
+                }
+                else
+                {
+                    string selId = selected.Id;
+
+                    <div class="card-head">
+                        <h2>@selected.Name</h2>
+                        <span class="status-pill st-@selected.Status.ToLowerInvariant()">@selected.Status</span>
+                    </div>
+                    <p class="hint mono">@selected.Id</p>
+                    <p class="hint">@selected.Location</p>
+
+                    @if (selected.Kind == "Gateway")
+                    {
+                        <p class="muted">The gateway is the root of the mesh. It cannot fail in this simulation; every route ends here.</p>
+                    }
+                    else
+                    {
+                        <div class="actions">
+                            @if (selected.Status == "Down" && selected.DownReason == "Manual")
+                            {
+                                <button class="btn-small go" disabled="@busy" @onclick="() => RestoreAsync(selId)">Restore node</button>
+                            }
+                            else if (selected.Status == "Down")
+                            {
+                                <span class="muted">Silent for too long, so the watchdog marked it disconnected. It rejoins when it reports again.</span>
+                            }
+                            else
+                            {
+                                <button class="btn-small stop" disabled="@busy" @onclick="() => FailAsync(selId)">Simulate failure</button>
+                            }
+
+                            @if (mesh.Nodes.Any(n => n.DownReason == "Manual"))
+                            {
+                                <button class="btn-small" disabled="@busy" @onclick="RestoreAllAsync">Restore all</button>
+                            }
+                        </div>
+
+                        @if (actionMessage is not null)
+                        {
+                            <div class="banner @(actionIsError ? "error" : "info")">@actionMessage</div>
+                        }
+
+                        @if (route is not null && route.DeviceId == selected.Id)
+                        {
+                            <h3>Route to gateway</h3>
+                            <p class="route-msg @(route.Rerouted ? "warn" : "")">@route.Message</p>
+
+                            @if (route.Reachable)
+                            {
+                                <table class="routes">
+                                    <thead><tr><th>Method</th><th>Path</th><th>Hops</th><th>Cost</th></tr></thead>
+                                    <tbody>
+                                        @RouteRow("Cheapest (Dijkstra)", route.Cheapest, "cheapest")
+                                        @RouteRow("Fewest hops (BFS)", route.FewestHops, "hops")
+                                        @RouteRow("Spanning tree (Prim)", route.MstRoute, "mst")
+                                    </tbody>
+                                </table>
+
+                                @if (route.MstExtraMilliwatts > 0)
+                                {
+                                    <p class="hint">The spanning tree joins every node for the least total power, but this node's own path through it costs @Mw(route.MstExtraMilliwatts) more than its cheapest route.</p>
+                                }
+                            }
+
+                            @if (route.Rerouted && route.Nominal is not null)
+                            {
+                                <p class="hint">Normal route before the failure: @string.Join(" → ", route.Nominal.NodeNames) (@Mw(route.Nominal.CostMilliwatts)). Rerouting costs @Mw(route.RerouteExtraMilliwatts) more.</p>
+                            }
+                            else if (!route.Reachable && route.Nominal is not null)
+                            {
+                                <p class="hint">Normal route: @string.Join(" → ", route.Nominal.NodeNames) (@Mw(route.Nominal.CostMilliwatts)).</p>
+                            }
+                        }
+                    }
+                }
+            </div>
+
+            @if (islandInfo is not null && islandInfo.Islands.Count > 0)
+            {
+                <div class="card island">
+                    <h3>Cut-off groups</h3>
+                    @foreach (var island in islandInfo.Islands)
+                    {
+                        <p>@string.Join(", ", island.Select(NameOf)) can still talk to each other but cannot reach the gateway.</p>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+
+    @if (selected is not null && selected.Kind == "Sensor")
+    {
+        <div class="card">
+            <div class="card-head">
+                <h2>History log · @selected.Name</h2>
+                @if (bounds is not null && bounds.ArchiveSize > 0)
+                {
+                    <span class="count">@bounds.ArchiveSize.ToString("N0") readings archived · @(bounds.OldestUtc?.ToLocalTime().ToString("dd MMM HH:mm")) to @(bounds.NewestUtc?.ToLocalTime().ToString("dd MMM HH:mm"))</span>
+                }
+            </div>
+            <p class="hint">Readings are stored in a balanced tree (AVL), so asking for a time window only touches the part of the tree that holds it.</p>
+
+            <div class="chips">
+                <button class="chip @(State.Topology.HistoryRange == "10m" ? "on" : "")" @onclick='() => SetRangeAsync("10m")'>Last 10 min</button>
+                <button class="chip @(State.Topology.HistoryRange == "1h" ? "on" : "")" @onclick='() => SetRangeAsync("1h")'>Last hour</button>
+                <button class="chip @(State.Topology.HistoryRange == "6h" ? "on" : "")" @onclick='() => SetRangeAsync("6h")'>Last 6 hours</button>
+                <button class="chip @(State.Topology.HistoryRange == "all" ? "on" : "")" @onclick='() => SetRangeAsync("all")'>Everything</button>
+                <button class="chip @(State.Topology.HistoryRange == "custom" ? "on" : "")" @onclick='() => SetRangeAsync("custom")'>Custom</button>
+            </div>
+
+            @if (State.Topology.HistoryRange == "custom")
+            {
+                <div class="custom-range">
+                    <label>From <input type="datetime-local" class="select" @bind="State.Topology.CustomFrom" @bind:event="onchange" /></label>
+                    <label>To <input type="datetime-local" class="select" @bind="State.Topology.CustomTo" @bind:event="onchange" /></label>
+                    <button class="btn-small go" disabled="@historyBusy" @onclick="RunHistoryAsync">Search</button>
+                </div>
+            }
+
+            @if (historyError is not null)
+            {
+                <div class="banner error">@historyError</div>
+            }
+
+            @if (rangeResult is not null)
+            {
+                <div class="stats">
+                    <span><strong>@rangeResult.TotalMatches.ToString("N0")</strong> readings in range</span>
+                    <span>tree touched <strong>@rangeResult.NodesVisited.ToString("N0")</strong> of @rangeResult.ArchiveSize.ToString("N0") nodes (height @rangeResult.TreeHeight)</span>
+                    <span>took <strong>@rangeResult.ElapsedMicroseconds.ToString("0.#", CultureInfo.InvariantCulture) µs</strong></span>
+                    @if (rangeResult.Truncated)
+                    {
+                        <span class="warn-text">showing the newest @rangeResult.Returned.ToString("N0")</span>
+                    }
+                    @if (BreachCount() is int breaches and > 0)
+                    {
+                        <span class="warn-text"><strong>@breaches</strong> readings outside the safe range</span>
+                    }
+                </div>
+
+                <TimelineChart Points="rangeResult.Points" Title="@selected.Name"
+                               LowLimit="@(selected.Category == SensorCategory.Environmental ? (double?)15 : null)"
+                               HighLimit="@(selected.Category == SensorCategory.Environmental ? (double?)85 : null)" />
+            }
+            else if (historyBusy)
+            {
+                <p class="muted">Searching…</p>
+            }
+
+            <div class="bench">
+                <button class="btn-small" disabled="@historyBusy" @onclick="BenchmarkAsync">Compare with a full scan</button>
+                @if (benchmark is not null)
+                {
+                    <span>
+                        Tree <strong>@benchmark.TreeMicroseconds.ToString("0.##", CultureInfo.InvariantCulture) µs</strong>
+                        vs scanning all @benchmark.ArchiveSize.ToString("N0") readings
+                        <strong>@benchmark.LinearMicroseconds.ToString("0.##", CultureInfo.InvariantCulture) µs</strong>
+                        · about <strong>@benchmark.SpeedUp.ToString("0.#", CultureInfo.InvariantCulture)×</strong> faster
+                        @if (!benchmark.ResultsMatch)
+                        {
+                            <em class="warn-text"> (results differ!)</em>
+                        }
+                    </span>
+                }
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private const double Width = 640;
+    private const double Height = 520;
+    private const double CenterX = Width / 2;
+    private const double CenterY = Height / 2;
+
+    private readonly CancellationTokenSource cts = new();
+    private readonly Dictionary<string, (double X, double Y)> layout = new();
+    private HashSet<string> routeLinks = new();
+
+    private MeshSnapshot? mesh;
+    private MeshRouteReport? route;
+    private MeshConnectivityInfo? islandInfo;
+    private string? connectionError;
+    private bool refreshing;
+
+    private bool busy;
+    private string? actionMessage;
+    private bool actionIsError;
+
+    private ArchiveRangeResponse? bounds;
+    private ArchiveRangeResponse? rangeResult;
+    private ArchiveBenchmarkResponse? benchmark;
+    private string? historyDeviceId;
+    private bool historyBusy;
+    private string? historyError;
+
+    private MeshNodeInfo? selected =>
+        mesh?.Nodes.FirstOrDefault(n => n.Id == State.Topology.SelectedNodeId);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshAsync();
+        _ = PollAsync(cts.Token);
+    }
+
+    private async Task PollAsync(CancellationToken ct)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(2000));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(ct))
+            {
+                await RefreshAsync();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            //navigated away
+        }
+    }
+
+    private async Task RefreshAsync()
+    {
+        if (refreshing) return;
+        refreshing = true;
+
+        try
+        {
+            var result = await Api.GetMeshAsync(cts.Token);
+            if (result.Ok && result.Data is not null)
+            {
+                mesh = result.Data;
+                connectionError = null;
+                EnsureSelection();
+                BuildLayout();
+
+                var routeResult = selected is { Kind: "Sensor" }
+                    ? await Api.GetMeshRouteAsync(selected.Id, cts.Token)
+                    : null;
+                route = routeResult is { Ok: true } ? routeResult.Data : null;
+
+                var connectivity = await Api.GetMeshConnectivityAsync(cts.Token);
+                islandInfo = connectivity.Ok ? connectivity.Data : islandInfo;
+
+                BuildRouteLinks();
+
+                if (selected is { Kind: "Sensor" } && historyDeviceId != selected.Id)
+                {
+                    await LoadHistoryForSelectionAsync();
+                }
+            }
+            else
+            {
+                connectionError = result.Error ?? "Unknown error.";
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        finally
+        {
+            refreshing = false;
+        }
+
+        if (!cts.IsCancellationRequested) StateHasChanged();
+    }
+
+    private void EnsureSelection()
+    {
+        if (mesh is null) return;
+
+        if (mesh.Nodes.All(n => n.Id != State.Topology.SelectedNodeId))
+        {
+            State.Topology.SelectedNodeId = mesh.Nodes.FirstOrDefault(n => n.Kind == "Sensor")?.Id ?? mesh.GatewayId;
+        }
+    }
+
+    // ---------- map layout ----------
+
+    //Gateway in the middle, sensors around it grouped by where they are deployed. Big meshes use two rings.
+    private void BuildLayout()
+    {
+        layout.Clear();
+        if (mesh is null) return;
+
+        layout[mesh.GatewayId] = (CenterX, CenterY);
+
+        var sensors = mesh.Nodes
+            .Where(n => n.Kind != "Gateway")
+            .OrderBy(n => n.Location, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(n => n.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        for (int i = 0; i < sensors.Count; i++)
+        {
+            double angle = -Math.PI / 2 + 2 * Math.PI * i / sensors.Count;
+            double radius = sensors.Count <= 10 ? 185 : (i % 2 == 0 ? 205 : 130);
+            layout[sensors[i].Id] = (CenterX + radius * Math.Cos(angle), CenterY + radius * Math.Sin(angle));
+        }
+    }
+
+    private void BuildRouteLinks()
+    {
+        routeLinks = new HashSet<string>(StringComparer.Ordinal);
+
+        var path = State.Topology.RouteMode switch
+        {
+            "hops" => route?.FewestHops,
+            "mst" => route?.MstRoute,
+            _ => route?.Cheapest
+        };
+
+        if (path is null) return;
+
+        for (int i = 0; i + 1 < path.NodeIds.Count; i++)
+        {
+            routeLinks.Add(PairKey(path.NodeIds[i], path.NodeIds[i + 1]));
+        }
+    }
+
+    private static string PairKey(string a, string b) =>
+        string.CompareOrdinal(a, b) <= 0 ? a + "|" + b : b + "|" + a;
+
+    // ---------- selection and actions ----------
+
+    private async Task Select(string id)
+    {
+        State.Topology.SelectedNodeId = id;
+        actionMessage = null;
+        route = null;
+        benchmark = null;
+        BuildRouteLinks();
+        await RefreshAsync();
+    }
+
+    private void SetRouteMode(string mode)
+    {
+        State.Topology.RouteMode = mode;
+        BuildRouteLinks();
+    }
+
+    private void OnMstOnlyChanged(ChangeEventArgs e) =>
+        State.Topology.MstOnly = e.Value is true;
+
+    private async Task FailAsync(string id) => await ChangeNodeAsync(() => Api.FailNodeAsync(id));
+
+    private async Task RestoreAsync(string id) => await ChangeNodeAsync(() => Api.RestoreNodeAsync(id));
+
+    private async Task RestoreAllAsync()
+    {
+        if (mesh is null) return;
+        busy = true;
+
+        foreach (var node in mesh.Nodes.Where(n => n.DownReason == "Manual").ToList())
+        {
+            await Api.RestoreNodeAsync(node.Id);
+        }
+
+        actionMessage = "All failed nodes restored.";
+        actionIsError = false;
+        busy = false;
+        await RefreshAsync();
+    }
+
+    private async Task ChangeNodeAsync(Func<Task<ApiResult<MeshFailureResult>>> call)
+    {
+        busy = true;
+        var result = await call();
+        actionIsError = !result.Ok;
+        actionMessage = result.Ok ? result.Data?.Message : result.Error;
+        busy = false;
+        await RefreshAsync();
+    }
+
+    // ---------- history ----------
+
+    private async Task LoadHistoryForSelectionAsync()
+    {
+        if (selected is null) return;
+
+        string id = selected.Id;
+        historyDeviceId = id;
+        rangeResult = null;
+        benchmark = null;
+        historyError = null;
+
+        var result = await Api.GetArchiveRangeAsync(id, null, null, 1, cts.Token);
+        if (!result.Ok)
+        {
+            bounds = null;
+            historyError = result.Error;
+            return;
+        }
+
+        bounds = result.Data;
+        await RunHistoryAsync();
+    }
+
+    private async Task SetRangeAsync(string range)
+    {
+        State.Topology.HistoryRange = range;
+
+        if (range == "custom")
+        {
+            if (bounds?.NewestUtc is DateTime newest && string.IsNullOrEmpty(State.Topology.CustomTo))
+            {
+                State.Topology.CustomTo = ToInput(newest);
+                State.Topology.CustomFrom = ToInput(newest.AddHours(-1));
+            }
+
+            return;
+        }
+
+        await RunHistoryAsync();
+    }
+
+    private static string ToInput(DateTime utc) =>
+        DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToLocalTime().ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+
+    private static DateTime? FromInput(string text) =>
+        DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var local)
+            ? local.ToUniversalTime()
+            : null;
+
+    private (DateTime? From, DateTime? To) Window()
+    {
+        var view = State.Topology;
+        if (view.HistoryRange == "custom") return (FromInput(view.CustomFrom), FromInput(view.CustomTo));
+
+        if (bounds?.NewestUtc is not DateTime newest) return (null, null);
+
+        return view.HistoryRange switch
+        {
+            "10m" => (newest.AddMinutes(-10), newest),
+            "1h" => (newest.AddHours(-1), newest),
+            "6h" => (newest.AddHours(-6), newest),
+            _ => (null, null)
+        };
+    }
+
+    private async Task RunHistoryAsync()
+    {
+        if (selected is null) return;
+
+        historyBusy = true;
+        historyError = null;
+        benchmark = null;
+
+        var (from, to) = Window();
+        var result = await Api.GetArchiveRangeAsync(selected.Id, from, to, 2000, cts.Token);
+
+        if (result.Ok)
+        {
+            rangeResult = result.Data;
+        }
+        else
+        {
+            rangeResult = null;
+            historyError = result.Error;
+        }
+
+        historyBusy = false;
+    }
+
+    private async Task BenchmarkAsync()
+    {
+        if (selected is null) return;
+
+        historyBusy = true;
+        var (from, to) = Window();
+        var result = await Api.GetArchiveBenchmarkAsync(selected.Id, from, to, 200, cts.Token);
+        benchmark = result.Ok ? result.Data : null;
+        historyError = result.Ok ? null : result.Error;
+        historyBusy = false;
+    }
+
+    private int? BreachCount()
+    {
+        if (rangeResult is null || selected?.Category != SensorCategory.Environmental) return null;
+        return rangeResult.Points.Count(p => p.Value < 15 || p.Value > 85);
+    }
+
+    // ---------- small helpers ----------
+
+    private bool IsDown(string id) =>
+        mesh?.Nodes.FirstOrDefault(n => n.Id == id)?.Status == "Down";
+
+    private string NameOf(string id) =>
+        mesh?.Nodes.FirstOrDefault(n => n.Id == id)?.Name ?? id;
+
+    private static string Badge(string id)
+    {
+        string last = id.Split(':').Last().TrimStart('0');
+        return last.Length == 0 ? "0" : last.Length > 3 ? last[..3] : last;
+    }
+
+    private static string Short(string name) => name.Length <= 13 ? name : name[..12] + "…";
+
+    private static string Mw(double value) => value.ToString("0.##", CultureInfo.InvariantCulture) + " mW";
+
+    private static string Fmt(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
+
+    private RenderFragment RouteRow(string label, MeshRoutePath? path, string mode) => @<tr class="@(State.Topology.RouteMode == mode ? "current" : "")">
+        <td>@label</td>
+        <td>@(path is null ? "-" : string.Join(" → ", path.NodeNames))</td>
+        <td>@(path?.Hops.ToString() ?? "-")</td>
+        <td>@(path is null ? "-" : Mw(path.CostMilliwatts))</td>
+    </tr>;
+
+    public void Dispose()
+    {
+        cts.Cancel();
+        cts.Dispose();
+    }
+}
