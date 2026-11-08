@@ -11,11 +11,12 @@ builder.Services.Configure<GatewayOptions>(builder.Configuration.GetSection("Gat
 
 //Core data-structure services (singletons so every request shares the same live state)
 builder.Services.AddSingleton<DeviceRegistry>();       //Dictionary - live devices by MAC / id
-builder.Services.AddSingleton<TelemetryHistory>();     //SortedDictionary - timeline per device
+builder.Services.AddSingleton<TelemetryHistory>();     //SortedDictionary timeline + AVL tree archive per device
 builder.Services.AddSingleton<AlertTracker>();         //HashSet - unique active alerts
 builder.Services.AddSingleton<InsightEngine>();        //Predictive engine
 builder.Services.AddSingleton<IngestionPipeline>();    //Queue + PriorityQueue
 builder.Services.AddSingleton<CommandService>();       //Stack - undo history
+builder.Services.AddSingleton<MeshTopologyService>();  //Graph - mesh routing between sensors and the gateway
 
 builder.Services.AddHostedService<PipelineProcessor>();
 builder.Services.AddHostedService<DisconnectWatchdog>();
@@ -45,12 +46,13 @@ if (app.Environment.IsDevelopment())
 
 app.UseCors("AllowBlazorClient");
 
-app.MapGet("/", () => Results.Ok(new { service = "Smart-X Gateway API", part = 2, status = "running" }));
+app.MapGet("/", () => Results.Ok(new { service = "Smart-X Gateway API", part = 3, status = "running" }));
 app.MapSensorEndpoints();
 app.MapTelemetryEndpoints();
 app.MapFileUploadEndpoints();
 app.MapStreamEndpoints();
 app.MapCommandEndpoints();
 app.MapInsightEndpoints();
+app.MapMeshEndpoints();
 
 app.Run();

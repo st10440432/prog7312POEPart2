@@ -293,11 +293,12 @@ public sealed class MeshGraph
 
     /// <summary>
     /// The cheapest route between two live nodes in total power cost (Dijkstra with a min-heap), or null if
-    /// either node is down or no route exists.
+    /// either node is down or no route exists. With <paramref name="ignoreFailures"/> set, down nodes are treated as
+    /// working, which gives the "nominal" route the mesh would use if nothing had failed.
     /// </summary>
-    public RouteResult? ShortestPath(string source, string destination)
+    public RouteResult? ShortestPath(string source, string destination, bool ignoreFailures = false)
     {
-        if (!IsAlive(source) || !IsAlive(destination))
+        if (!Usable(source, ignoreFailures) || !Usable(destination, ignoreFailures))
         {
             return null;
         }
@@ -324,7 +325,7 @@ public sealed class MeshGraph
 
             foreach (var (neighbour, linkCost) in _adjacency[node])
             {
-                if (!IsAlive(neighbour))
+                if (!Usable(neighbour, ignoreFailures))
                 {
                     continue;
                 }
@@ -486,6 +487,9 @@ public sealed class MeshGraph
         _adjacency.Keys.Where(node => IsAlive(node) && !included.Contains(node)).ToList();
 
     // ---------- helpers ----------
+
+    private bool Usable(string id, bool ignoreFailures) =>
+        ignoreFailures ? _adjacency.ContainsKey(id) : IsAlive(id);
 
     private static void RequireId(string id)
     {
