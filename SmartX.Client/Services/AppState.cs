@@ -13,6 +13,7 @@ public sealed class AppState
 {
     public StreamViewState Stream { get; } = new();
     public SensorsViewState Sensors { get; } = new();
+    public TopologyViewState Topology { get; } = new();
 
     /// <summary>Last snapshot received, so the Command Stream page renders instantly when you come back to it.</summary>
     public StreamSnapshot? LastSnapshot { get; set; }
@@ -33,4 +34,20 @@ public sealed class SensorsViewState
     public string? TelemetryDeviceId { get; set; }
     public string TelemetryValue { get; set; } = string.Empty;
     public string? UploadDeviceId { get; set; }
+}
+
+public sealed class TopologyViewState
+{
+    public string? SelectedNodeId { get; set; }
+
+    /// <summary>Which route is drawn on the map: "cheapest", "hops" or "mst".</summary>
+    public string RouteMode { get; set; } = "cheapest";
+
+    public bool MstOnly { get; set; }
+
+    /// <summary>History window: "10m", "1h", "6h", "all" or "custom".</summary>
+    public string HistoryRange { get; set; } = "1h";
+
+    public string CustomFrom { get; set; } = string.Empty;
+    public string CustomTo { get; set; } = string.Empty;
 }
