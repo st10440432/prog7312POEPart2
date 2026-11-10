@@ -16,6 +16,8 @@ using SmartX.Shared.Models;
 //   moisture-drop  Moisture Sensor 1 reports a severe low reading, then exit
 //   disconnect     normal, but Smart Meter 4 and Pump B go silent (watchdog raises Disconnected)
 //   flood          burst of --count (default 300) normal packets, then a spike while the backlog drains
+//   node-failure   normal, but Moisture Sensor 1 (a relay for Pump A) goes silent for ~85 s out of every 180 s,
+//                  so the watchdog marks it down and the mesh reroutes around it, then it comes back
 
 var options = SimOptions.Parse(args);
 using var http = new HttpClient { BaseAddress = new Uri(options.ApiUrl), Timeout = TimeSpan.FromSeconds(20) };
@@ -128,12 +130,35 @@ static async Task RunContinuous(HttpClient http, List<SimDevice> fleet, SimOptio
         : new HashSet<string>();
 
     var nextAnomaly = DateTime.UtcNow.AddSeconds(20);
+    var started = DateTime.UtcNow;
+    bool relayDown = false;
     long tick = 0;
     Console.WriteLine("Sending telemetry. Press Ctrl+C to stop.");
 
     while (true)
     {
         tick++;
+
+        if (options.Scenario == "node-failure")
+        {
+            //Healthy for 20 s, silent for 85 s (longer than the 60 s disconnect limit), then back; repeats every 180 s
+            double phase = (DateTime.UtcNow - started).TotalSeconds % 180;
+            bool shouldBeSilent = phase >= 20 && phase < 105;
+
+            if (shouldBeSilent && !relayDown)
+            {
+                relayDown = true;
+                silent.Add(Fleet.Moisture1);
+                Console.WriteLine("** node-failure: Moisture Sensor 1 has gone silent (watch the Topology page reroute in about a minute)");
+            }
+            else if (!shouldBeSilent && relayDown)
+            {
+                relayDown = false;
+                silent.Remove(Fleet.Moisture1);
+                Console.WriteLine("** node-failure: Moisture Sensor 1 is reporting again");
+            }
+        }
+
         var desired = await GetDesiredStates(http);
 
         var sends = new List<Task<(bool Ok, IngestResponse? Body)>>();
