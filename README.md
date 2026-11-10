@@ -118,7 +118,7 @@ Stop everything with `docker compose down` (add `-v` to also delete uploaded fil
 
 ## Using the application
 
-1. **Home** shows the three pillars. Pillars 1 and 2 are active; pillar 3 is disabled.
+1. **Home** shows the three pillars. All three pillars are active.
 2. **Sensor Ingestion (Part 1)** – register sensors, submit readings, attach files, view live tables with anomaly highlighting and the deployment hierarchy. Its tables now refresh automatically every 3 seconds.
 3. **Command Stream (Part 2)** – the live operations console:
    - **Status strip** – FIFO / priority queue depth, average latency per lane, active alerts, duplicate alerts blocked, undo-stack depth.
@@ -249,6 +249,59 @@ A node is **down** if an operator failed it on the Topology page, or if the watc
 ### History archive
 
 Every reading goes into both the Part 2 timeline (`SortedDictionary`, newest 500 per device, used by the charts) and a per-device AVL archive (up to 20,000 readings). At startup the seeder backfills about a day of history for each device, with a few anomaly episodes, so there is something to search. The Topology page's history log queries the archive and shows how many tree nodes the search touched out of the archive size, and a button times the tree against a full scan of the same readings.
+
+### Code examples
+
+**Range query on the AVL archive.** `TelemetryHistory.QueryArchive` turns a time window into a key range (the sequence number breaks ties between readings with the same timestamp) and the tree skips every subtree outside it:
+
+```csharp
+var hits = tree.Range(new HistoryKey(from, long.MinValue),
+                      new HistoryKey(to,   long.MaxValue), out int nodesVisited);
+```
+
+Inside `AvlTree.CollectRange`, a subtree is only entered if it could still hold a key in range:
+
+```csharp
+if (cmpLow < 0)  CollectRange(node.Left,  low, high, results, ref visited);
+if (cmpLow <= 0 && cmpHigh >= 0) results.Add(new(node.Key, node.Value));
+if (cmpHigh > 0) CollectRange(node.Right, low, high, results, ref visited);
+```
+
+**Finding the cheapest route and the spanning tree.** Dijkstra relaxes each live neighbour using the overloaded `+` and `<` on `LinkCost`; Prim grows the tree from the gateway with the same heap:
+
+```csharp
+LinkCost candidate = cost + linkCost;
+if (!distance.TryGetValue(neighbour, out var known) || candidate < known)
+{
+    distance[neighbour] = candidate;
+    previous[neighbour] = node;
+    heap.Enqueue(neighbour, candidate);
+}
+```
+
+```csharp
+var graph = new MeshGraph("GATEWAY");
+graph.AddEdge("Pump A", "Moisture 1", new LinkCost(9));
+graph.AddEdge("Moisture 1", "GATEWAY", new LinkCost(12));
+RouteResult? route = graph.ShortestPath("Pump A", "GATEWAY");   // Pump A, Moisture 1, GATEWAY: 21 mW
+graph.SetNodeDown("Moisture 1", true);                           // routes now avoid it
+MstResult tree = graph.MinimumSpanningTree();                    // next hop per node in tree.Parent
+```
+
+### How performance scales
+
+A scan checks every reading, so its cost is n. A range query visits about k + 2 log2 n nodes, where k is the number of readings in the window, because it walks down to the two ends of the window and collects what lies between. The table shows expected node visits for a window of 60 readings (a perfectly balanced tree is shown; an AVL tree is at most about 1.44 times taller).
+
+| Readings stored (n) | Scan visits | Tree visits (about) | Fewer visits |
+| --- | --- | --- | --- |
+| 1,000 | 1,000 | 80 | 12× |
+| 10,000 | 10,000 | 88 | 114× |
+| 100,000 | 100,000 | 94 | about 1,000× |
+| 1,000,000 | 1,000,000 | 100 | about 10,000× |
+
+You can measure this yourself: the Topology page's history panel and `GET /api/telemetry/{id}/benchmark` report nodes visited, tree height and tree-versus-scan timings for any window on the live archive (about 8,700 readings per device). The time gain is smaller than the visit count suggests because a tight scan loop is cheap per reading while each tree visit follows a pointer, but the gap widens as the archive grows.
+
+Graph work is done per request: BFS and DFS cost O(V + E), Dijkstra O((V + E) log V) and Prim O(E log V), which is instant for a mesh of hundreds of nodes. For thousands of nodes the routes and spanning tree should be cached and recomputed only when a node or link changes.
 
 ### Using the Topology page
 
@@ -447,6 +500,8 @@ The tests cover the shared models and anomaly rules, the alert tracker, the devi
 Claude AI was used to assist in the generation of this readme along with the steps to run and test the program, this information was provided by me, Claude simply put it into readable .md format and all output was reviewed extensively by myself, st10440432, to ensure accuracy and legibility. I also requested it to generate the graph above as a nice visual cue for the application flow. 
 
 Claude AI was used in the code to assist with complex calculation and algorithm generation, like the one for suggested actions. I also made use of Claude heavily to create and troubleshoot the simulation tool for the project, ensuring that data remains realistic while also functioning correctly when an abnormality is pushed. Claude was also used in the frontend to assist with overall layout. Main code was all written by myself, st10440432, with Claude used to assist with troubleshooting errors as they arose.
+
+**Part 3.** Claude (through Claude Code) produced first drafts of most of the Part 3 work from the assignment brief and my instructions: the AVL tree, min-heap, mesh graph and mesh topology service, the history archive and API endpoints, the xUnit test suite and CI workflow, the Network Topology page, the `node-failure` simulator scenario, the Part 3 section of this readme, and the draft of the completion report, technology recommendations and feedback ledger. I set the scope and the order of work, pushed the work to my GitHub repository in stages, built and ran everything on my own machine, ran the unit tests, the simulator and the API checks, and reported the results back so that errors (for example a build error on the Topology page) could be corrected. I take responsibility for the submitted work and have reviewed it.
 
 ## Troubleshooting
 
