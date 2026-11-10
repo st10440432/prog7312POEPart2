@@ -278,8 +278,8 @@ else
             @if (State.Topology.HistoryRange == "custom")
             {
                 <div class="custom-range">
-                    <label>From <input type="datetime-local" class="select" @bind="State.Topology.CustomFrom" @bind:event="onchange" /></label>
-                    <label>To <input type="datetime-local" class="select" @bind="State.Topology.CustomTo" @bind:event="onchange" /></label>
+                    <label>From <input type="datetime-local" class="select" value="@State.Topology.CustomFrom" @onchange="OnCustomFromChanged" /></label>
+                    <label>To <input type="datetime-local" class="select" value="@State.Topology.CustomTo" @onchange="OnCustomToChanged" /></label>
                     <button class="btn-small go" disabled="@historyBusy" @onclick="RunHistoryAsync">Search</button>
                 </div>
             }
@@ -509,6 +509,13 @@ else
 
     private void OnMstOnlyChanged(ChangeEventArgs e) =>
         State.Topology.MstOnly = e.Value is true;
+
+    //Plain strings: Blazor's @bind on datetime-local expects a DateTime, but the text is parsed later in FromInput
+    private void OnCustomFromChanged(ChangeEventArgs e) =>
+        State.Topology.CustomFrom = e.Value?.ToString() ?? string.Empty;
+
+    private void OnCustomToChanged(ChangeEventArgs e) =>
+        State.Topology.CustomTo = e.Value?.ToString() ?? string.Empty;
 
     private async Task FailAsync(string id) => await ChangeNodeAsync(() => Api.FailNodeAsync(id));
 
