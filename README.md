@@ -1,14 +1,14 @@
 # Smart-X IoT Mesh Gateway
 
-**PROG7312 – Portfolio of Evidence, Part 2: Real-Time Processing and Device Management**
+**PROG7312 – Portfolio of Evidence, Part 3: Network Topology and Mesh Routing**
 
-Smart-X is a simulated IoT gateway. Devices (ESP32-style sensors, smart plugs, pumps, valves) send telemetry over HTTP; the gateway ingests it, classifies it, stores it, raises alerts, lets an operator control actuators, and learns from what the operator does.
+Smart-X is a simulated IoT gateway. Devices (ESP32-style sensors, smart plugs, pumps, valves) send telemetry over HTTP; the gateway ingests it, classifies it, stores it, raises alerts, lets an operator control actuators, learns from what the operator does, and routes data across a mesh of sensors that heals around failures.
 
 | Pillar | Status |
 |---|---|
 | 1. Sensor Data Ingestion & Telemetry (Part 1) | Working, still available from menu |
-| 2. Real-Time Command Stream & History (Part 2) |  **This submission** |
-| 3. Network Topology & Mesh Routing (Part 3) | Mesh map, routing, failure simulation and history search |
+| 2. Real-Time Command Stream & History (Part 2) | Working, still available from menu |
+| 3. Network Topology & Mesh Routing (Part 3) | **This submission**: mesh map, routing, failure simulation and history search |
 
 ---
 ## VIDEO LINK
@@ -21,12 +21,14 @@ https://www.youtube.com/watch?v=Zqc4D5rxK1k
 3. [Run it](#run-it)
 4. [Using the application](#using-the-application)
 5. [How to test each Part 2 requirement](#how-to-test-each-part-2-requirement)
-6. [Architecture and data structures](#architecture-and-data-structures)
-7. [API reference](#api-reference)
-8. [Configuration](#configuration)
-9. [Part 1 improvements](#part-1-improvements)
-10. [Project structure](#project-structure)
-11. [Troubleshooting](#troubleshooting)
+6. [Part 3: Network topology and mesh routing](#part-3-network-topology-and-mesh-routing)
+7. [Architecture and data structures](#architecture-and-data-structures)
+8. [API reference](#api-reference)
+9. [Configuration](#configuration)
+10. [Part 1 improvements](#part-1-improvements)
+11. [Project structure](#project-structure)
+12. [Running the automated tests](#running-the-automated-tests)
+13. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -116,7 +118,7 @@ Stop everything with `docker compose down` (add `-v` to also delete uploaded fil
 
 ## Using the application
 
-1. **Home** shows the three pillars. Pillars 1 and 2 are active; pillar 3 is disabled.
+1. **Home** shows the three pillars. All three pillars are active.
 2. **Sensor Ingestion (Part 1)** – register sensors, submit readings, attach files, view live tables with anomaly highlighting and the deployment hierarchy. Its tables now refresh automatically every 3 seconds.
 3. **Command Stream (Part 2)** – the live operations console:
    - **Status strip** – FIFO / priority queue depth, average latency per lane, active alerts, duplicate alerts blocked, undo-stack depth.
@@ -151,6 +153,7 @@ dotnet run --project SmartX.Simulator -- <scenario> [--api URL] [--interval ms] 
 | `moisture-drop` | Moisture Sensor 1 reports a severe low reading, then exits. |
 | `disconnect` | `normal`, but Smart Meter 4 and Pump B go silent. |
 | `flood` | Sends `--count` (default 300) normal packets, then a critical spike while the backlog drains, and prints both latencies. |
+| `node-failure` | `normal`, but Moisture Sensor 1 goes silent for about 85 s out of every 180 s. The watchdog marks it down, the Topology page shows Pump A rerouting around it, and it rejoins when it reports again. |
 
 The simulator defaults to `http://localhost:5248`. In Docker it uses `http://smartx-api:8080`.
 
@@ -217,6 +220,109 @@ Disconnects: stop the simulator and wait 60 s. Each device gets exactly one *Dis
 Type a search and pick a category on **Command Stream**, go to **Sensor Ingestion**, start typing a new sensor, then come back. Filters and the form draft are still there, and the page renders instantly from the last snapshot.
 
 Stop the API while a page is open: a banner appears and data resumes when the API is back.
+
+## Part 3: Network topology and mesh routing
+
+Part 3 adds two things: a balanced tree (AVL) that answers "show me the readings between time A and time B" quickly, and a graph of the sensor mesh that finds the cheapest way for each sensor to reach the gateway and keeps working when nodes fail. Both are on the **Network Topology** page (`/topology`).
+
+### Data structures
+
+| Structure | Where | Why |
+|---|---|---|
+| AVL tree | `SmartX.Shared/Structures/AvlTree.cs`, used by `TelemetryHistory` | Long-term history per device, keyed by timestamp. A time-range query skips every subtree outside the range, so it costs O(log n + k) instead of scanning all n readings. Insert and remove rebalance with rotations, so ascending timestamps (the normal case) cannot degrade it into a linked list. |
+| Weighted graph (adjacency list) | `SmartX.Shared/Mesh/MeshGraph.cs` | Sensors are nodes, radio links are edges, and each link costs a number of milliwatts. |
+| Breadth-first search | `MeshGraph.Bfs` | Hops from the gateway to every node, and the fewest-hops route. |
+| Depth-first search (recursive) | `MeshGraph.Dfs`, `AnalyseConnectivity` | Finds which nodes can still reach the gateway and groups the rest into isolated "islands". |
+| Dijkstra | `MeshGraph.ShortestPath` | Cheapest route in total power from a sensor to the gateway. |
+| Prim and Kruskal | `MeshGraph.MinimumSpanningTree`, `MinimumSpanningTreeKruskal` | The cheapest set of links that still joins every reachable node. Two algorithms are implemented so each can check the other. Kruskal uses a union-find. |
+| Binary min-heap | `SmartX.Shared/Structures/MinHeap.cs` | The priority queue under Dijkstra and Prim. |
+| `LinkCost` struct | `SmartX.Shared/Mesh/LinkCost.cs` | Overloaded `+` and comparison operators, so path costs are summed and compared like numbers. |
+
+Recursion is used in the AVL insert, remove and range search, the depth-first search, the spanning tree's path back to the gateway, and the union-find lookup.
+
+### How the mesh is built
+
+`MeshTopologyService` builds the graph from the registered sensors. Each new sensor links to the three cheapest nodes already in the mesh. A link's cost comes from where the two devices are deployed: same zone is cheap (3 mW), same facility another zone costs 6 mW, another facility costs 12 mW, plus a fixed offset of 0 to 4 mW taken from a stable hash of the two device ids. The same sensors therefore always produce the same mesh, and new sensors join automatically when registered. The gateway is the node `GATEWAY`, installed in the location set by `Gateway:GatewayLocation`.
+
+A node is **down** if an operator failed it on the Topology page, or if the watchdog has flagged it Disconnected (silent for 60 s). Down nodes are treated as removed from the graph, so routes heal around them. A live node whose every path to the gateway runs through down nodes is **isolated**.
+
+### History archive
+
+Every reading goes into both the Part 2 timeline (`SortedDictionary`, newest 500 per device, used by the charts) and a per-device AVL archive (up to 20,000 readings). At startup the seeder backfills about a day of history for each device, with a few anomaly episodes, so there is something to search. The Topology page's history log queries the archive and shows how many tree nodes the search touched out of the archive size, and a button times the tree against a full scan of the same readings.
+
+### Code examples
+
+**Range query on the AVL archive.** `TelemetryHistory.QueryArchive` turns a time window into a key range (the sequence number breaks ties between readings with the same timestamp) and the tree skips every subtree outside it:
+
+```csharp
+var hits = tree.Range(new HistoryKey(from, long.MinValue),
+                      new HistoryKey(to,   long.MaxValue), out int nodesVisited);
+```
+
+Inside `AvlTree.CollectRange`, a subtree is only entered if it could still hold a key in range:
+
+```csharp
+if (cmpLow < 0)  CollectRange(node.Left,  low, high, results, ref visited);
+if (cmpLow <= 0 && cmpHigh >= 0) results.Add(new(node.Key, node.Value));
+if (cmpHigh > 0) CollectRange(node.Right, low, high, results, ref visited);
+```
+
+**Finding the cheapest route and the spanning tree.** Dijkstra relaxes each live neighbour using the overloaded `+` and `<` on `LinkCost`; Prim grows the tree from the gateway with the same heap:
+
+```csharp
+LinkCost candidate = cost + linkCost;
+if (!distance.TryGetValue(neighbour, out var known) || candidate < known)
+{
+    distance[neighbour] = candidate;
+    previous[neighbour] = node;
+    heap.Enqueue(neighbour, candidate);
+}
+```
+
+```csharp
+var graph = new MeshGraph("GATEWAY");
+graph.AddEdge("Pump A", "Moisture 1", new LinkCost(9));
+graph.AddEdge("Moisture 1", "GATEWAY", new LinkCost(12));
+RouteResult? route = graph.ShortestPath("Pump A", "GATEWAY");   // Pump A, Moisture 1, GATEWAY: 21 mW
+graph.SetNodeDown("Moisture 1", true);                           // routes now avoid it
+MstResult tree = graph.MinimumSpanningTree();                    // next hop per node in tree.Parent
+```
+
+### How performance scales
+
+A scan checks every reading, so its cost is n. A range query visits about k + 2 log2 n nodes, where k is the number of readings in the window, because it walks down to the two ends of the window and collects what lies between. The table shows expected node visits for a window of 60 readings (a perfectly balanced tree is shown; an AVL tree is at most about 1.44 times taller).
+
+| Readings stored (n) | Scan visits | Tree visits (about) | Fewer visits |
+| --- | --- | --- | --- |
+| 1,000 | 1,000 | 80 | 12× |
+| 10,000 | 10,000 | 88 | 114× |
+| 100,000 | 100,000 | 94 | about 1,000× |
+| 1,000,000 | 1,000,000 | 100 | about 10,000× |
+
+You can measure this yourself: the Topology page's history panel and `GET /api/telemetry/{id}/benchmark` report nodes visited, tree height and tree-versus-scan timings for any window on the live archive (about 8,700 readings per device). The time gain is smaller than the visit count suggests because a tight scan loop is cheap per reading while each tree visit follows a pointer, but the gap widens as the archive grows.
+
+Graph work is done per request: BFS and DFS cost O(V + E), Dijkstra O((V + E) log V) and Prim O(E log V), which is instant for a mesh of hundreds of nodes. For thousands of nodes the routes and spanning tree should be cached and recomputed only when a node or link changes.
+
+### Using the Topology page
+
+1. Start the API, the client and the simulator (`dotnet run --project SmartX.Simulator`). Without the simulator, devices go silent after a minute and show as down.
+2. Open **Network Topology**. The map shows the gateway in the centre and the sensors around it. Blue links are the minimum spanning tree.
+3. Click a sensor. The panel compares three routes to the gateway: cheapest (Dijkstra), fewest hops (BFS) and along the spanning tree (Prim). The chips above the map choose which one is drawn.
+4. Click a relay such as Moisture Sensor 1, press **Simulate failure**, then click Pump A. Its route moves to another node and the panel reports the extra power it costs. **Restore node** brings it back.
+5. Use the history log under the map: pick a range, then **Compare with a full scan**.
+6. Or run `dotnet run --project SmartX.Simulator -- node-failure` and watch a node go silent, turn red and rejoin.
+
+### Part 3 endpoints
+
+| Method | Route | Description |
+|---|---|---|
+| GET | `/api/telemetry/{id}/range?from=&to=&max=` | Readings in a time window from the AVL archive, plus nodes visited, archive size, tree height and timing |
+| GET | `/api/telemetry/{id}/benchmark?from=&to=&repetitions=` | The same query timed against a linear scan |
+| GET | `/api/mesh` | Nodes, links, spanning tree links and up / down / isolated counts |
+| GET | `/api/mesh/connectivity` | Nodes that reach the gateway, isolated groups, down nodes |
+| GET | `/api/mesh/route/{id}` | Fewest-hops, cheapest and spanning-tree routes, and any reroute |
+| POST | `/api/mesh/nodes/{id}/fail` | Simulate a node failure |
+| POST | `/api/mesh/nodes/{id}/restore` | Bring a failed node back |
 
 ## Architecture and data structures
 
@@ -301,6 +407,8 @@ Base URL: `http://localhost:5248` (local) or `http://localhost:8080` (Docker). A
 | POST | `/api/insights/events` | `{term}` – report a search so the engine can learn |
 | POST | `/api/insights/feedback` | `{suggestionId, accepted}` |
 
+The Part 3 routes (history range, benchmark and mesh) are listed under [Part 3](#part-3-network-topology-and-mesh-routing).
+
 Telemetry POSTs return **201** with `{lane, latencyMs, reason}` once processed, or **202** if the queue is too backed up to wait (3 s). They return **404** for an unknown device and **400** for a category mismatch or invalid value.
 
 ## Configuration
@@ -313,6 +421,9 @@ API settings live in the `Gateway` section of `SmartX.Api/appsettings.json` and 
 | `StaleAfterSeconds` | 60 | A silent device is flagged Stale, then Disconnected. |
 | `WatchdogIntervalSeconds` | 5 | How often the disconnect scan runs. |
 | `MaxHistoryPerDevice` | 500 | Timeline readings kept per device. |
+| `MaxArchivePerDevice` | 20000 | Readings kept per device in the AVL archive. |
+| `ArchiveBackfillPoints` | 8640 | Synthetic history readings seeded per device at startup (a day at one reading per 10 s). Set `0` to skip. |
+| `GatewayLocation` | `Utility Room` | Where the gateway is installed. Sensors in the same place get cheap links to it. |
 
 Anomaly thresholds are in `SmartX.Shared/Models/AnomalyRules.cs` (environmental safe range 15–85, severe below 10 / above 90, power spike > 500 W jump).
 
@@ -348,27 +459,49 @@ SmartX.Shared/                 Models shared by API, client and simulator
     DeploymentZone.cs          Recursive zone tree + validation
     ZoneTree.cs                Recursive roll-up for the hierarchy view
     StreamModels.cs            Part 2 DTOs
+    ArchiveModels.cs           Part 3 history range / benchmark DTOs
+    MeshModels.cs              Part 3 mesh DTOs
+  Structures/
+    AvlTree.cs                 Self-balancing tree with range queries
+    MinHeap.cs                 Binary min-heap
+  Mesh/
+    MeshGraph.cs               Graph, BFS, DFS, Dijkstra, Prim, Kruskal
+    LinkCost.cs                Link cost with operator overloads
+    MeshResults.cs             Route, traversal and spanning tree results
 SmartX.Api/
-  Endpoints/                   Sensor, Telemetry, FileUpload, Stream, Command, Insight
+  Endpoints/                   Sensor, Telemetry, FileUpload, Stream, Command, Insight, Mesh
   Services/
     DeviceRegistry.cs          Dictionary
     IngestionPipeline.cs       Queue + PriorityQueue, worker, watchdog
-    TelemetryHistory.cs        SortedDictionary
+    TelemetryHistory.cs        SortedDictionary timeline + AVL archive
+    MeshTopologyService.cs     Builds the mesh graph, routes and failures
     AlertTracker.cs            HashSet
     CommandService.cs          Stack (undo)
     InsightEngine.cs           Predictive engine
     DataSeeder.cs              Demo devices, readings and operator history
 SmartX.Client/
-  Pages/                       Home, Sensors (Part 1), CommandStream (Part 2)
+  Pages/                       Home, Sensors (Part 1), CommandStream (Part 2), Topology (Part 3)
   Components/                  TimelineChart (SVG), ZoneNode (recursive)
   Services/                    ApiClient, AppState
   Layout/                      NavMenu, MainLayout (error boundary)
 SmartX.Simulator/              Device fleet + scenarios
+SmartX.Tests/                  xUnit tests (models, alerts, registry, AVL, heap, graph, history archive, mesh service)
+.github/workflows/ci.yml       Builds and tests on every push and pull request
 ```
+
+## Running the automated tests
+
+```bash
+dotnet test SmartX.slnx
+```
+
+The tests cover the shared models and anomaly rules, the alert tracker, the device registry, the AVL tree (balance, removal and range queries checked against a brute-force filter), the min-heap, the mesh graph (BFS, DFS, Dijkstra, Prim and Kruskal on a worked example, plus randomised checks that Prim matches Kruskal and Dijkstra matches Floyd-Warshall), the history archive and the mesh service. The same command runs in GitHub Actions on every push.
 ## AI USAGE DECLARATION
 Claude AI was used to assist in the generation of this readme along with the steps to run and test the program, this information was provided by me, Claude simply put it into readable .md format and all output was reviewed extensively by myself, st10440432, to ensure accuracy and legibility. I also requested it to generate the graph above as a nice visual cue for the application flow. 
 
 Claude AI was used in the code to assist with complex calculation and algorithm generation, like the one for suggested actions. I also made use of Claude heavily to create and troubleshoot the simulation tool for the project, ensuring that data remains realistic while also functioning correctly when an abnormality is pushed. Claude was also used in the frontend to assist with overall layout. Main code was all written by myself, st10440432, with Claude used to assist with troubleshooting errors as they arose.
+
+**Part 3.** Claude (through Claude Code) produced first drafts of most of the Part 3 work from the assignment brief and my instructions: the AVL tree, min-heap, mesh graph and mesh topology service, the history archive and API endpoints, the xUnit test suite and CI workflow, the Network Topology page, the `node-failure` simulator scenario, the Part 3 section of this readme, and the draft of the completion report, technology recommendations and feedback ledger. I set the scope and the order of work, pushed the work to my GitHub repository in stages, built and ran everything on my own machine, ran the unit tests, the simulator and the API checks, and reported the results back so that errors (for example a build error on the Topology page) could be corrected. I take responsibility for the submitted work and have reviewed it.
 
 ## Troubleshooting
 
