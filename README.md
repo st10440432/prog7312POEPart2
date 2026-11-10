@@ -500,6 +500,7 @@ The tests cover the shared models and anomaly rules, the alert tracker, the devi
 Claude AI was used to assist in the generation of this readme along with the steps to run and test the program, this information was provided by me, Claude simply put it into readable .md format and all output was reviewed extensively by myself, st10440432, to ensure accuracy and legibility. I also requested it to generate the graph above as a nice visual cue for the application flow. 
 
 Claude AI was used in the code to assist with complex calculation and algorithm generation, like the one for suggested actions. I also made use of Claude heavily to create and troubleshoot the simulation tool for the project, ensuring that data remains realistic while also functioning correctly when an abnormality is pushed. Claude was also used in the frontend to assist with overall layout. Main code was all written by myself, st10440432, with Claude used to assist with troubleshooting errors as they arose.
+For Part 3, Claude AI was used throughout Part 3 to help draft and troubleshoot code and tests. I directed the scope and the order of the work, built and ran everything on my own machine, tested the results, and reviewed the output before submitting it.
 
 ## Troubleshooting
 
