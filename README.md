@@ -501,8 +501,6 @@ Claude AI was used to assist in the generation of this readme along with the ste
 
 Claude AI was used in the code to assist with complex calculation and algorithm generation, like the one for suggested actions. I also made use of Claude heavily to create and troubleshoot the simulation tool for the project, ensuring that data remains realistic while also functioning correctly when an abnormality is pushed. Claude was also used in the frontend to assist with overall layout. Main code was all written by myself, st10440432, with Claude used to assist with troubleshooting errors as they arose.
 
-**Part 3.** Claude (through Claude Code) produced first drafts of most of the Part 3 work from the assignment brief and my instructions: the AVL tree, min-heap, mesh graph and mesh topology service, the history archive and API endpoints, the xUnit test suite and CI workflow, the Network Topology page, the `node-failure` simulator scenario, the Part 3 section of this readme, and the draft of the completion report, technology recommendations and feedback ledger. I set the scope and the order of work, pushed the work to my GitHub repository in stages, built and ran everything on my own machine, ran the unit tests, the simulator and the API checks, and reported the results back so that errors (for example a build error on the Topology page) could be corrected. I take responsibility for the submitted work and have reviewed it.
-
 ## Troubleshooting
 
 | Problem | Fix |
