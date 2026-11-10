@@ -14,4 +14,13 @@ public sealed class GatewayOptions
     public int WatchdogIntervalSeconds { get; set; } = 5;
 
     public int MaxHistoryPerDevice { get; set; } = 500;
+
+    /// <summary>Readings kept per device in the long-term AVL archive used for historical range queries.</summary>
+    public int MaxArchivePerDevice { get; set; } = 20000;
+
+    /// <summary>Readings of synthetic history seeded per device into the archive at startup (8640 = a day at 10 s).</summary>
+    public int ArchiveBackfillPoints { get; set; } = 8640;
+
+    /// <summary>Where the gateway itself is installed. Sensors in the same place get cheap links to it.</summary>
+    public string GatewayLocation { get; set; } = "Utility Room";
 }

@@ -32,6 +32,51 @@ public static class TelemetryEndpoints
             return Results.Ok(points);
         });
 
+        //GET /api/telemetry/{deviceId}/range?from=...&to=...&max=500 - historical query on the AVL archive
+        group.MapGet("/{deviceId}/range", (string deviceId, DeviceRegistry registry, TelemetryHistory history,
+            DateTime? from, DateTime? to, int? max) =>
+        {
+            var sensor = registry.FindSensor(deviceId);
+            if (sensor is null) return Results.NotFound();
+            if (from is not null && to is not null && from > to)
+                return Results.BadRequest("'from' must not be later than 'to'.");
+
+            int take = Math.Clamp(max ?? 500, 1, 2000);
+            DateTime? fromUtc = from?.ToUniversalTime();
+            DateTime? toUtc = to?.ToUniversalTime();
+            var result = history.QueryArchive(sensor.DeviceId, fromUtc, toUtc, take);
+
+            return Results.Ok(new ArchiveRangeResponse
+            {
+                DeviceId = sensor.DeviceId,
+                DeviceName = sensor.DisplayName,
+                FromUtc = fromUtc ?? result.Oldest ?? DateTime.UtcNow,
+                ToUtc = toUtc ?? result.Newest ?? DateTime.UtcNow,
+                Points = result.Points.Select(p => new TimelinePoint { TimestampUtc = p.Timestamp, Value = p.Value }).ToList(),
+                TotalMatches = result.TotalMatches,
+                Returned = result.Points.Count,
+                Truncated = result.TotalMatches > result.Points.Count,
+                NodesVisited = result.NodesVisited,
+                ArchiveSize = result.ArchiveSize,
+                TreeHeight = result.TreeHeight,
+                ElapsedMicroseconds = result.ElapsedMicroseconds,
+                OldestUtc = result.Oldest,
+                NewestUtc = result.Newest
+            });
+        });
+
+        //GET /api/telemetry/{deviceId}/benchmark?from=...&to=...&repetitions=200 - AVL range query vs full scan
+        group.MapGet("/{deviceId}/benchmark", (string deviceId, DeviceRegistry registry, TelemetryHistory history,
+            DateTime? from, DateTime? to, int? repetitions) =>
+        {
+            var sensor = registry.FindSensor(deviceId);
+            if (sensor is null) return Results.NotFound();
+            if (from is not null && to is not null && from > to)
+                return Results.BadRequest("'from' must not be later than 'to'.");
+
+            return Results.Ok(history.Benchmark(sensor.DeviceId, from?.ToUniversalTime(), to?.ToUniversalTime(), repetitions ?? 200));
+        });
+
         //POST /api/telemetry/batch
         //every reading gets classified and placed in the FIFO or priority lane like a single packet.
         group.MapPost("/batch", (BatchIngestRequest request, DeviceRegistry registry, IngestionPipeline pipeline) =>

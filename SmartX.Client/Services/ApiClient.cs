@@ -50,6 +50,39 @@ public sealed class ApiClient
     public Task<ApiResult<TelemetryDashboardResponse>> GetTelemetryAsync(CancellationToken ct = default) =>
         GetAsync<TelemetryDashboardResponse>("api/telemetry", ct);
 
+    // ---- history archive (AVL range query)
+
+    public Task<ApiResult<ArchiveRangeResponse>> GetArchiveRangeAsync(string deviceId, DateTime? fromUtc, DateTime? toUtc, int max, CancellationToken ct = default) =>
+        GetAsync<ArchiveRangeResponse>($"api/telemetry/{Uri.EscapeDataString(deviceId)}/range?max={max}{RangeQuery(fromUtc, toUtc)}", ct);
+
+    public Task<ApiResult<ArchiveBenchmarkResponse>> GetArchiveBenchmarkAsync(string deviceId, DateTime? fromUtc, DateTime? toUtc, int repetitions, CancellationToken ct = default) =>
+        GetAsync<ArchiveBenchmarkResponse>($"api/telemetry/{Uri.EscapeDataString(deviceId)}/benchmark?repetitions={repetitions}{RangeQuery(fromUtc, toUtc)}", ct);
+
+    private static string RangeQuery(DateTime? fromUtc, DateTime? toUtc)
+    {
+        string query = string.Empty;
+        if (fromUtc is not null) query += "&from=" + Uri.EscapeDataString(DateTime.SpecifyKind(fromUtc.Value, DateTimeKind.Utc).ToString("o"));
+        if (toUtc is not null) query += "&to=" + Uri.EscapeDataString(DateTime.SpecifyKind(toUtc.Value, DateTimeKind.Utc).ToString("o"));
+        return query;
+    }
+
+    // ---- mesh topology
+
+    public Task<ApiResult<MeshSnapshot>> GetMeshAsync(CancellationToken ct = default) =>
+        GetAsync<MeshSnapshot>("api/mesh", ct);
+
+    public Task<ApiResult<MeshRouteReport>> GetMeshRouteAsync(string deviceId, CancellationToken ct = default) =>
+        GetAsync<MeshRouteReport>($"api/mesh/route/{Uri.EscapeDataString(deviceId)}", ct);
+
+    public Task<ApiResult<MeshConnectivityInfo>> GetMeshConnectivityAsync(CancellationToken ct = default) =>
+        GetAsync<MeshConnectivityInfo>("api/mesh/connectivity", ct);
+
+    public Task<ApiResult<MeshFailureResult>> FailNodeAsync(string deviceId) =>
+        PostAsync<MeshFailureResult>($"api/mesh/nodes/{Uri.EscapeDataString(deviceId)}/fail", new { });
+
+    public Task<ApiResult<MeshFailureResult>> RestoreNodeAsync(string deviceId) =>
+        PostAsync<MeshFailureResult>($"api/mesh/nodes/{Uri.EscapeDataString(deviceId)}/restore", new { });
+
     // ---- commands
 
     public Task<ApiResult<CommandRecord>> ExecuteAsync(CommandRequest request) =>

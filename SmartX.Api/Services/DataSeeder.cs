@@ -76,6 +76,51 @@ public static class DataSeeder
         SeedSeries(pipeline, ValveEast, SensorCategory.Actuator, new double[] { 1, 1, 1, 1 }, now, syncDesired: true);
 
         SeedOperatorBehaviour(engine, now);
+
+        var history = services.GetRequiredService<TelemetryHistory>();
+        var options = services.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>().Value;
+        SeedArchive(history, sensors, now.AddSeconds(-60), options.ArchiveBackfillPoints);
+    }
+
+    /// <summary>
+    /// Long-term history for the AVL archive: one reading every 10 seconds going back from 'end', per device.
+    /// The values are deterministic (fixed seed per device) with a few anomaly episodes mixed in, so the history
+    /// page has something worth searching for. Only the archive is filled; the live timeline stays as it was.
+    /// </summary>
+    private static void SeedArchive(TelemetryHistory history, SensorRegistration[] sensors, DateTime end, int points)
+    {
+        if (points <= 0) return;
+
+        var step = TimeSpan.FromSeconds(10);
+
+        for (int d = 0; d < sensors.Length; d++)
+        {
+            var sensor = sensors[d];
+            var random = new Random(1000 + d);
+            var batch = new List<HistoryPoint>(points);
+
+            for (int i = 0; i < points; i++)
+            {
+                DateTime stamp = end - step * (points - 1 - i);
+                double value = sensor.Category switch
+                {
+                    SensorCategory.Environmental => 45 + 8 * Math.Sin(i / 180.0 + d) + random.NextDouble() * 2 - 1,
+                    SensorCategory.PowerConsumption => 300 + d * 40 + 60 * Math.Sin(i / 90.0) + random.Next(-15, 16),
+                    _ => (i / (400 + d * 37)) % 2 == 0 ? 1 : 0
+                };
+
+                //An anomaly episode roughly every 1500 readings, lasting 6 readings
+                if (sensor.Category != SensorCategory.Actuator && (i + d * 211) % 1500 < 6)
+                {
+                    value = sensor.Category == SensorCategory.Environmental ? (d % 2 == 0 ? 4.0 : 96.0) : 1700;
+                }
+
+                batch.Add(new HistoryPoint(sensor.DeviceId, sensor.Category, sensor.DeploymentLocation,
+                    Math.Round(value, 1), stamp));
+            }
+
+            history.BackfillArchive(batch);
+        }
     }
 
     private static void SeedSeries(IngestionPipeline pipeline, string deviceId, SensorCategory category,

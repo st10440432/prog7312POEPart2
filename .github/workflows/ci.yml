@@ -1,0 +1,32 @@
+name: CI
+
+# Builds the whole solution (API, Blazor client, shared library, simulator) and runs the unit tests
+# on every push to main / part3 branches and on every pull request into main.
+
+on:
+  push:
+    branches: [ main, "part3/**" ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore dependencies
+        run: dotnet restore SmartX.slnx
+
+      - name: Build (Release)
+        run: dotnet build SmartX.slnx --no-restore -c Release
+
+      - name: Run unit tests
+        run: dotnet test SmartX.slnx --no-build -c Release --verbosity normal
