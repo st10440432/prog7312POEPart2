@@ -12,7 +12,7 @@ Smart-X is a simulated IoT gateway. Devices (ESP32-style sensors, smart plugs, p
 
 ---
 ## VIDEO LINK
-https://www.youtube.com/watch?v=Zqc4D5rxK1k
+[https://www.youtube.com/watch?v=Zqc4D5rxK1k](https://youtu.be/AjSokuEUFhs)
 
 ## Contents
 
